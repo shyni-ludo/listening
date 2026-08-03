@@ -428,7 +428,7 @@ function compute(rows) {
   const refMs = maxUts*1000, refM = mKey(new Date(refMs));
   for (const [k, e] of bySong) {
     e.daysGone = ((refMs - e.last*1000) / 86400000) | 0;
-    e.lifespan = ((e.last - e.first) / 86400000) | 0;
+    e.lifespan = ((e.last - e.first) / 86400) | 0;   // first/last are in seconds
     let peakM = 0, peakN = 0;
     for (const mk of monthSet.get(k)) {
       const n = peakMap.get(k+"|"+mk) || 0;
@@ -734,7 +734,8 @@ function renderForgotten() {
     [fmtN(dust.length), "Songs gathering dust", `≥${FORG_MIN_PLAYS} plays, unheard for 1+ year`],
     [fmtN(dust.reduce((n,e)=>n+e.plays,0)), "Plays locked in them", "lifetime plays of those songs"],
     [esc(trunc(top.track,24)), "Most forgotten", `${fmtN(top.plays)} plays · peak ${mLabel(top.peakMonth)}`],
-    [esc(trunc(big.track,24)), "Biggest hit you've dropped", `${fmtN(big.plays)} plays · last ${fmtDate(big.last)}`],
+    big ? [esc(trunc(big.track,24)), "Biggest hit you've dropped", `${fmtN(big.plays)} plays · last ${fmtDate(big.last)}`]
+        : ["—", "Biggest hit you've dropped", "nothing unheard for a full year yet"],
   ]);
   $("f-bar-cap").textContent = `Songs with at least ${FORG_MIN_PLAYS} lifetime plays, ranked by forgotten score.`;
   $("f-table-cap").textContent = `All ${fmtN(cand.length)} eligible songs — top ${TABLE_PREVIEW} shown by default, search or hit “show all”. Hover the mini charts for quarterly plays.`;
@@ -798,7 +799,8 @@ function renderEvergreen() {
     [fmtN(cand.length), "Long-term relationships", `≥${EVER_MIN_PLAYS} plays · in rotation 1+ year`],
     [fmtN(cand.filter(e=>e.alive).length), "Still in rotation", `played in the last ${RECENT_DAYS} days`],
     [esc(trunc(long.track,24)), "Longest relationship", `${fmtSpan(long.lifespan)} · ${esc(trunc(long.artist,20))}`],
-    [esc(trunc(steady.track,24)), "Most reliable", `played in ${(100*steady.coverage).toFixed(0)}% of ${steady.availMonths} months`],
+    steady ? [esc(trunc(steady.track,24)), "Most reliable", `played in ${(100*steady.coverage).toFixed(0)}% of ${steady.availMonths} months`]
+           : ["—", "Most reliable", "needs a song with 2+ years of history"],
   ]);
   $("e-table-cap").innerHTML = `All ${fmtN(cand.length)} candidates — type to filter, hover the mini charts for quarterly plays. <span class='alive'></span> = played in the last ${RECENT_DAYS} days.`;
   rankedBar("fig-ever-bar", cand.slice(0, BAR_ROWS), COOL, s => s.toFixed(1), r =>
