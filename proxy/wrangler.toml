@@ -1,0 +1,8 @@
+name = "listening-lastfm"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# The API key is NOT set here — it is a secret, set once with:
+#   npx wrangler secret put LASTFM_KEY
+# Putting it in this file would defeat the whole point, since this file is
+# committed to a public repo.

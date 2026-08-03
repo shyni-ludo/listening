@@ -263,11 +263,15 @@ tbody tr.extra.revealed { display:table-row; }
 "use strict";
 /* =================================================================== config */
 const API = "https://ws.audioscrobbler.com/2.0/";
-/* The key is XOR-folded instead of sitting in the source as a plain 32-hex
-   string. That keeps it out of view-source and away from the regex scanners
-   that harvest API keys from public repos — it is NOT secret. last.fm takes
-   the key as a URL parameter, so anyone who opens the network tab still sees
-   it. Only a server-side proxy can actually hide it. */
+/* Set by build_web.py from proxy_url.txt. When present the key lives in a
+   Cloudflare Worker (see proxy/) and EMBEDDED_KEY below is empty — nothing
+   secret is shipped to the browser at all. Empty here means the old
+   behaviour: call last.fm directly with the embedded key. */
+const PROXY = "__LASTFM_PROXY__";
+/* Only used when there is no proxy. XOR-folded rather than written as a plain
+   32-hex string, which keeps it out of view-source and away from the scanners
+   that harvest keys off public repos — but it is NOT secret: last.fm takes the
+   key as a URL parameter, so it shows up in any visitor's network tab. */
 const KEY_PAD = "listening-report";
 const EMBEDDED_KEY = (() => {
   const raw = atob("__LASTFM_API_KEY__");
@@ -370,20 +374,28 @@ async function idbSet(user, val) {
 let cancelled = false;
 async function apiPage(user, key, page, fromTs) {
   const p = new URLSearchParams({method:"user.getrecenttracks", user,
-    api_key:key, limit:PAGE_SIZE, page:String(page), format:"json"});
+    limit:PAGE_SIZE, page:String(page), format:"json"});
   if (fromTs) p.set("from", String(fromTs));
+  // No key means route through the proxy, which adds its own server-side. A
+  // visitor who supplied their own key goes straight to last.fm with it.
+  const viaProxy = PROXY && !key;
+  if (key) p.set("api_key", key);
+  const base = viaProxy ? PROXY : API;
+  const sep = base.includes("?") ? "&" : "?";
   for (let attempt = 1; attempt <= 4; attempt++) {
     if (cancelled) throw new Error("cancelled");
     let d = null;
     try {
-      const r = await fetch(API + "?" + p);
+      const r = await fetch(base + sep + p);
       d = await r.json();
     } catch (e) { /* fall through to retry */ }
     if (d && !d.error) return d;
     const code = d && d.error;
     if (code === 6) throw new Error("User not found — check the spelling.");
     if (code === 4 || code === 10 || code === 26)
-      throw new Error("The API key was rejected. Set a valid one under “advanced”.");
+      throw new Error(viaProxy
+        ? "last.fm rejected the server's API key — the site owner needs to refresh it."
+        : "The API key was rejected. Set a valid one under “advanced”.");
     if (attempt < 4) await sleep(2 ** attempt * 500);
   }
   throw new Error("last.fm is having trouble right now — try again in a bit.");
