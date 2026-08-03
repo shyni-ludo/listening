@@ -200,7 +200,8 @@ tbody tr.extra.revealed { display:table-row; }
         <div><h3>Top Albums</h3><div id="fig-top-al"></div></div>
       </div></section>
     <section class="panel"><h2>Your rotating obsessions</h2>
-      <p class="cap">Quarterly top-10 leaderboard — who was on top, and when.</p>
+      <p class="cap">Quarterly top-10 leaderboard — who was on top, and when.
+        Hover a line to follow one artist; big dots mark a #1 quarter.</p>
       <div id="fig-bump"></div></section>
     <section class="panel"><h2>How the leaderboard was built</h2>
       <p class="cap">Cumulative scrobbles for your all-time top 8 artists.</p>
@@ -290,7 +291,13 @@ function baseLayout(height) {
     xaxis:{showgrid:false, zeroline:false, linecolor:"#2b3442", automargin:true},
     yaxis:{showgrid:true, gridcolor:GRID, zeroline:false, linecolor:"#2b3442", automargin:true} };
 }
-function plot(id, traces, layout) { Plotly.newPlot($(id), traces, layout, CFG); }
+/* Charts that spread their own axis object drop baseLayout's automargin and
+   clip their tick labels — re-apply it here so it can't be forgotten again. */
+function plot(id, traces, layout) {
+  for (const k of ["xaxis", "yaxis", "xaxis2", "yaxis2"])
+    if (layout[k]) layout[k] = {automargin: true, ...layout[k]};
+  Plotly.newPlot($(id), traces, layout, CFG);
+}
 
 /* date helpers (visitor's local timezone) */
 const mKey = d => d.getFullYear()*12 + d.getMonth();
@@ -630,17 +637,42 @@ function renderBump(topA) {
     });
     const text = qs.map((q,i) => `${a}<br>${qLabel(q)} – rank #${ranks[i]} (${fmtN(counts.get(q).get(a))} scrobbles)`);
     return {type:"scatter", x:[...Array(nq).keys()], y:ranks, mode:"lines+markers",
-            line:{color:PALETTE[j], width:2.5}, marker:{size:7}, hoverinfo:"text", text};
+            line:{color:PALETTE[j], width:2.5, shape:"spline", smoothing:0.8},
+            // halo so crossings read as over/under; #1 gets a bigger dot
+            marker:{size:ranks.map(r => r === 1 ? 11 : 7), color:PALETTE[j],
+                    line:{color:"#161b22", width:2}},
+            hoverinfo:"text", text};
   });
   const anns = top10.map((a,j) => ({
     x:nq-1+0.35, y:traces[j].y[nq-1], text:esc(trunc(a,18)), showarrow:false, xanchor:"left",
     font:{size:11, color:PALETTE[j]} }));
   const tq1 = qs.map((q,i)=>[q,i]).filter(([q]) => q%4===0);
-  plot("fig-bump", traces, { ...baseLayout(420), annotations:anns,
+  plot("fig-bump", traces, { ...baseLayout(420), annotations:anns, hovermode:"closest",
     xaxis:{tickmode:"array", tickvals:tq1.map(e=>e[1]), ticktext:tq1.map(e=>String((e[0]/4)|0)),
            range:[-0.6, nq+3.2], tickfont:{size:11, color:"#8b98a8"}, showgrid:false, zeroline:false},
     yaxis:{autorange:"reversed", dtick:1, range:[10.6,0.4], tickvals:[1,2,3,4,5,6,7,8,9,10],
            showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}} });
+  isolateOnHover($("fig-bump"), top10.length);
+}
+
+/* Ten crossing lines are unreadable at rest — hovering one fades the other
+   nine (and their end labels) so a single artist's arc can be followed. */
+function isolateOnHover(gd, n) {
+  const idx = [...Array(n).keys()];
+  let cur;                                  // skip redundant redraws while
+  const focus = ci => {                     // the pointer tracks one line
+    if (ci === cur) return;
+    cur = ci;
+    const lit = i => ci === null || i === ci;
+    Plotly.restyle(gd, {opacity: idx.map(i => lit(i) ? 1 : 0.12),
+                        "line.width": idx.map(i => i === ci ? 4 : 2.5)});
+    Plotly.relayout(gd, Object.fromEntries(
+      idx.map(i => [`annotations[${i}].opacity`, lit(i) ? 1 : 0.15])));
+  };
+  gd.removeAllListeners?.("plotly_hover");   // load() can rebuild this plot
+  gd.removeAllListeners?.("plotly_unhover");
+  gd.on("plotly_hover", d => focus(d.points[0].curveNumber));
+  gd.on("plotly_unhover", () => focus(null));
 }
 
 function renderCumulative(topA) {
@@ -671,9 +703,9 @@ function renderCumulative(topA) {
     annotations: anns.map(an => ({x:x[x.length-1], y:an.ly,
       text:` ${esc(trunc(an.a,16))} (${fmtN(an.v)})`, showarrow:false, xanchor:"left",
       xshift:6, font:{size:11, color:an.c}})),
-    margin:{l:12, r:150, t:26, b:12},
+    margin:{l:52, r:150, t:26, b:12},
     xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"}, range:[x[0], x[x.length-1]], showgrid:false, zeroline:false},
-    yaxis:{showgrid:true, gridcolor:GRID, zeroline:false} });
+    yaxis:{tickformat:",d", tickfont:{size:10.5, color:"#8b98a8"}, showgrid:true, gridcolor:GRID, zeroline:false} });
 }
 
 function renderDiscovery() {
@@ -691,10 +723,11 @@ function renderDiscovery() {
      hovertemplate:"%{x|%b %Y} – %{y} new artists<extra></extra>"},
     {type:"scatter", x, y:yl, mode:"lines", line:{color:"#4cc9f0", width:2.5}, yaxis:"y2",
      hovertemplate:"%{y:,} artists total<extra></extra>"}
-  ], { ...baseLayout(340), bargap:0.25,
+  ], { ...baseLayout(340), bargap:0.25, margin:{l:46, r:52, t:26, b:12},
     xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"}, showgrid:false, zeroline:false},
-    yaxis:{tickfont:{size:10.5, color:"#e85540"}, showgrid:true, gridcolor:GRID, zeroline:false},
-    yaxis2:{overlaying:"y", side:"right", showgrid:false, tickfont:{size:10.5, color:"#4cc9f0"}} });
+    yaxis:{tickformat:",d", tickfont:{size:10.5, color:"#e85540"}, showgrid:true, gridcolor:GRID, zeroline:false},
+    yaxis2:{overlaying:"y", side:"right", showgrid:false, tickformat:",d",
+            tickfont:{size:10.5, color:"#4cc9f0"}} });
 }
 
 /* ------------------------------------------------------------- ranked bars */
