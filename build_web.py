@@ -39,7 +39,9 @@ def fold(key):
 
 
 def read_trimmed(path):
-    with open(path, encoding="utf-8") as f:
+    # utf-8-sig: PowerShell's `>` and Set-Content write a BOM, which would
+    # otherwise end up glued to the front of the URL or the key.
+    with open(path, encoding="utf-8-sig") as f:
         return f.read().strip()
 
 

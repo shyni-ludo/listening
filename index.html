@@ -267,14 +267,14 @@ const API = "https://ws.audioscrobbler.com/2.0/";
    Cloudflare Worker (see proxy/) and EMBEDDED_KEY below is empty — nothing
    secret is shipped to the browser at all. Empty here means the old
    behaviour: call last.fm directly with the embedded key. */
-const PROXY = "";
+const PROXY = "https://listening-lastfm.shyni-ludo.workers.dev";
 /* Only used when there is no proxy. XOR-folded rather than written as a plain
    32-hex string, which keeps it out of view-source and away from the scanners
    that harvest keys off public repos — but it is NOT secret: last.fm takes the
    key as a URL parameter, so it shows up in any visitor's network tab. */
 const KEY_PAD = "listening-report";
 const EMBEDDED_KEY = (() => {
-  const raw = atob("DQsVQlRXD1lTFUMERF5AQwhcQxcDDFlXAhoXU0VWEUY=");
+  const raw = atob("");
   let s = "";
   for (let i = 0; i < raw.length; i++)
     s += String.fromCharCode(raw.charCodeAt(i) ^ KEY_PAD.charCodeAt(i % KEY_PAD.length));
