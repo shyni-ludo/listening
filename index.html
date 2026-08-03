@@ -248,6 +248,7 @@ tbody tr.extra.revealed { display:table-row; }
 /* =================================================================== config */
 const API = "https://ws.audioscrobbler.com/2.0/";
 const EMBEDDED_KEY = "abf619f7481a4127d50cfb09e7e659c2";
+const CACHE_VERSION = 2;   // bump to invalidate every visitor's cached scrobbles
 const PAGE_SIZE = 200;
 const CONCURRENCY = 8;
 const FORG_MIN_PLAYS = 15, EVER_MIN_PLAYS = 30, EVER_MIN_LIFE = 365, RECENT_DAYS = 90;
@@ -927,16 +928,19 @@ function showErr(msg) {
   const e = $("landing-err"); e.textContent = msg; e.style.display = "block";
 }
 
-async function load(user, range) {
+async function load(user, range, force) {
   cancelled = false;
   $("landing-err").style.display = "none";
   $("landing").classList.add("hidden");
   $("loading").classList.remove("hidden");
   const key = getKey();
   try {
-    const cached = await idbGet(user).catch(() => null);
-    let rows = cached ? cached.rows : [];
-    let scope = cached ? cached.scope : null;
+    const cached = force ? null : await idbGet(user).catch(() => null);
+    let rows = [], scope = null;
+    if (cached && cached.v === CACHE_VERSION) {   // stale-version cache → refetch all
+      rows = cached.rows;
+      scope = cached.scope;
+    }
     let fromTs = null;
     if (range === "full" && scope !== "full") rows = [];       // need everything
     if (rows.length) fromTs = rows.reduce((m,r) => Math.max(m, r[0]), 0) + 1;
@@ -950,7 +954,8 @@ async function load(user, range) {
       const merged = new Map();
       for (const r of rows.concat(newRows)) merged.set(r[0]+"|"+r[3]+"|"+r[1], r);
       rows = [...merged.values()];
-      await idbSet(user, {rows, scope: range === "full" ? "full" : (scope || "1y")}).catch(()=>{});
+      await idbSet(user, {v: CACHE_VERSION, rows,
+                          scope: range === "full" ? "full" : (scope || "1y")}).catch(()=>{});
     }
     if (!rows.length) throw new Error("No scrobbles found for “" + user + "” in that range.");
     $("load-note").textContent = "crunching the numbers…";
@@ -998,7 +1003,7 @@ $("btn-cancel").addEventListener("click", () => { cancelled = true; });
   if (u) {
     $("inp-user").value = u;
     if (h.get("range")) $("sel-range").value = h.get("range");
-    load(u, $("sel-range").value);
+    load(u, $("sel-range").value, h.get("fresh") === "1");
   }
 })();
 $("btn-go").addEventListener("click", () =>
