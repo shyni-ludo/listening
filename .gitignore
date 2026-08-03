@@ -1,0 +1,16 @@
+# secrets & local data — never commit these
+lastfm_key.txt
+scrobbles.csv
+
+# generated locally
+dashboard.html
+index.html.bak
+
+# unrelated / personal
+audio-1785586731544.mp3
+viz.py
+scrobble_heatmap.png
+cumulative_milestones.html
+top_artists_timeline.html
+
+__pycache__/

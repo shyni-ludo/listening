@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>you, in music — last.fm listening report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+* { box-sizing: border-box; }
+body { background:#0d1117; color:#e6edf3; margin:0; padding:0 20px 30px;
+       font-family:'Inter','Segoe UI',system-ui,sans-serif; min-height:100vh; }
+body[data-tab='overview']  { --a:#ff8c42; --b:#ff5964; --c:#ffd07b; }
+body[data-tab='forgotten'] { --a:#ff8c42; --b:#e0523c; --c:#ffd07b; }
+body[data-tab='evergreen'] { --a:#06d6a0; --b:#4cc9f0; --c:#b388eb; }
+.wrap { max-width:1180px; margin:0 auto; }
+a { color:var(--a); text-decoration:none; }
+a:hover { text-decoration:underline; }
+
+/* ---- nav / tabs ---- */
+nav.tabs { position:sticky; top:0; z-index:50; display:flex; align-items:flex-end;
+           gap:4px; background:rgba(13,17,23,.93); backdrop-filter:blur(8px);
+           border-bottom:1px solid #232b36; padding:12px 20px 0; margin:0 -20px; }
+.brand { font-weight:800; font-size:15px; margin-right:auto; padding:0 10px 11px;
+         letter-spacing:-0.2px; cursor:pointer; }
+.brand em { font-style:normal; color:var(--a); }
+.tab { background:none; border:none; color:#8b98a8; font-family:inherit;
+       font-size:13.5px; font-weight:600; padding:10px 14px 11px; cursor:pointer;
+       border-bottom:2px solid transparent; }
+.tab:hover { color:#e6edf3; }
+.tab.active { color:var(--a); border-bottom-color:var(--a); }
+.tabpage { display:none; }
+.tabpage.active { display:block; }
+
+/* ---- shared content styles ---- */
+h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
+     background:linear-gradient(90deg,var(--b),var(--a),var(--c));
+     -webkit-background-clip:text; background-clip:text; color:transparent; }
+.tag { color:#8b98a8; margin-top:10px; font-size:15px; }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+         gap:14px; margin:36px 0 10px; }
+.card { background:#161b22; border:1px solid #232b36; border-radius:14px;
+        padding:18px 20px; transition:transform .15s ease, border-color .15s ease; }
+.card:hover { transform:translateY(-2px); border-color:var(--a); }
+.num { font-size:25px; font-weight:800; }
+.lbl { color:#8b98a8; font-size:11.5px; text-transform:uppercase;
+       letter-spacing:.09em; margin-top:5px; }
+.sub2 { color:#5d6a78; font-size:12px; margin-top:7px; }
+.panel { background:#161b22; border:1px solid #232b36; border-radius:14px;
+         padding:24px 24px 12px; margin:24px 0; }
+.panel h2 { margin:0 0 3px; font-size:19px; font-weight:700; }
+.cap { color:#8b98a8; font-size:13px; margin:0 0 12px; }
+.cal-year { margin-bottom:2px; }
+.grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.grid3 h3 { color:#e6edf3; font-size:14px; margin:4px 0 0; text-align:center; }
+footer { color:#5d6a78; font-size:12px; text-align:center; margin:44px 0 8px; }
+
+/* ---- tables ---- */
+.tbl-controls { display:flex; gap:10px; margin-bottom:12px; align-items:center; }
+.search { flex:1; background:#0d1117; border:1px solid #2b3442; border-radius:10px;
+          color:#e6edf3; font-family:inherit; font-size:14px; padding:10px 14px;
+          outline:none; }
+.search:focus { border-color:var(--a); }
+.search::placeholder { color:#5d6a78; }
+.matches { color:#5d6a78; font-size:12px; min-width:86px; text-align:right; }
+.btn { background:#1c2330; border:1px solid #2b3442; color:#c9d4e0;
+       border-radius:10px; padding:9px 14px; font-family:inherit; font-size:12px;
+       font-weight:600; cursor:pointer; white-space:nowrap; }
+.btn:hover { border-color:var(--a); color:#e6edf3; }
+.btn-primary { background:linear-gradient(90deg,var(--b),var(--a)); border:none;
+       color:#0d1117; font-weight:800; font-size:14px; padding:12px 26px; }
+.btn-primary:hover { filter:brightness(1.1); color:#0d1117; }
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+th { text-align:left; color:#8b98a8; text-transform:uppercase; font-size:10.5px;
+     letter-spacing:.08em; padding:10px 10px; border-bottom:1px solid #2b3442; }
+td { padding:7px 10px; border-bottom:1px solid #1c222b; color:#c9d4e0; }
+tbody tr:hover td { background:#1a212b; }
+tbody tr.extra { display:none; }
+tbody tr.extra.revealed { display:table-row; }
+.rank { color:#5d6a78; font-weight:600; }
+.r1 { color:#ffd07b; } .r2 { color:#c9d4e0; } .r3 { color:#ff8c42; }
+.song { font-weight:600; color:#e6edf3; }
+.artist { color:#8b98a8; }
+.num-c { font-variant-numeric:tabular-nums; }
+.dim { color:#5d6a78; font-size:11.5px; }
+.spark { display:block; }
+.alive { display:inline-block; width:8px; height:8px; border-radius:50%;
+         background:#06d6a0; margin-right:7px; }
+.scorewrap { background:#1c222b; border-radius:5px; height:16px; position:relative;
+             overflow:hidden; min-width:90px; }
+.scorebar { background:linear-gradient(90deg,var(--b),var(--a)); height:100%;
+            border-radius:5px; }
+.scorewrap span { position:absolute; right:8px; top:0; font-size:11px;
+                  line-height:16px; color:#e6edf3; font-variant-numeric:tabular-nums; }
+
+/* ---- landing & loading overlays ---- */
+.overlay { position:fixed; inset:0; z-index:100; background:#0d1117;
+           display:flex; align-items:center; justify-content:center; padding:20px; }
+.overlay.hidden { display:none; }
+.hero { max-width:520px; width:100%; text-align:center; }
+.hero h1 { margin-top:0; font-size:52px; }
+.hero p { color:#8b98a8; font-size:15px; line-height:1.6; }
+.form { background:#161b22; border:1px solid #232b36; border-radius:16px;
+        padding:26px; margin-top:28px; text-align:left; }
+.form label { display:block; color:#8b98a8; font-size:11.5px; text-transform:uppercase;
+              letter-spacing:.09em; margin:0 0 6px; }
+.form input[type=text], .form select { width:100%; background:#0d1117;
+        border:1px solid #2b3442; border-radius:10px; color:#e6edf3;
+        font-family:inherit; font-size:15px; padding:12px 14px; outline:none;
+        margin-bottom:16px; }
+.form input[type=text]:focus, .form select:focus { border-color:#ff8c42; }
+.form .btn-primary { width:100%; }
+.form details { margin-bottom:16px; color:#5d6a78; font-size:12.5px; }
+.form summary { cursor:pointer; }
+.form summary:hover { color:#8b98a8; }
+.form .err { display:none; background:#3a1d24; border:1px solid #8a2f45; color:#ffb3ab;
+             border-radius:10px; padding:10px 14px; font-size:13px; margin-top:14px; }
+.hero .fine { color:#5d6a78; font-size:12px; margin-top:18px; }
+.progress { background:#161b22; border:1px solid #232b36; border-radius:16px;
+            padding:30px; width:100%; max-width:520px; }
+.progress .bar { background:#1c222b; border-radius:8px; height:14px; overflow:hidden;
+                 margin:16px 0 10px; }
+.progress .fill { background:linear-gradient(90deg,#ff5964,#ff8c42,#ffd07b);
+                  height:100%; width:0%; border-radius:8px; transition:width .2s ease; }
+.progress .status { color:#8b98a8; font-size:13px; display:flex;
+                    justify-content:space-between; }
+.progress .cancel { margin-top:18px; }
+</style>
+</head>
+<body data-tab="overview">
+
+<!-- ======================= LANDING ======================= -->
+<div class="overlay" id="landing">
+  <div class="hero">
+    <h1>you, in music</h1>
+    <p>Enter any last.fm username and get a full listening report:
+       every day mapped, your rotating obsessions, the songs you forgot,
+       and the ones that never left.<br>Data goes straight from last.fm to
+       your browser — nothing is stored anywhere else.</p>
+    <div class="form">
+      <label for="inp-user">last.fm username</label>
+      <input type="text" id="inp-user" placeholder="e.g. rj" autocomplete="off"
+             spellcheck="false">
+      <label for="sel-range">history</label>
+      <select id="sel-range">
+        <option value="full" selected>Full history (can take a minute for big accounts)</option>
+        <option value="1y">Last 12 months (faster)</option>
+      </select>
+      <details><summary>advanced: use your own API key</summary>
+        <label for="inp-key" style="margin-top:12px">last.fm API key</label>
+        <input type="text" id="inp-key" placeholder="API key" autocomplete="off">
+      </details>
+      <button class="btn btn-primary" id="btn-go">Build my report →</button>
+      <div class="err" id="landing-err"></div>
+    </div>
+    <p class="fine">plots by plotly · data by <a href="https://www.last.fm/api" target="_blank" rel="noopener">last.fm API</a> · your history is cached locally in your browser for instant revisits</p>
+  </div>
+</div>
+
+<!-- ======================= LOADING ======================= -->
+<div class="overlay hidden" id="loading">
+  <div class="progress">
+    <h2 style="margin:0;font-size:20px">Fetching scrobbles…</h2>
+    <div class="bar"><div class="fill" id="load-fill"></div></div>
+    <div class="status"><span id="load-pages">page 0 / ?</span><span id="load-count">0 scrobbles</span></div>
+    <div class="status" style="margin-top:6px"><span id="load-note">first visit downloads everything; revisits only fetch what's new</span></div>
+    <div class="cancel"><button class="btn" id="btn-cancel">cancel</button></div>
+  </div>
+</div>
+
+<!-- ======================= APP ======================= -->
+<div class="wrap" id="app" style="display:none">
+  <nav class="tabs">
+    <div class="brand" id="brand" title="start over">♪ my <em>listening</em></div>
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="forgotten">Forgotten songs</button>
+    <button class="tab" data-tab="evergreen">Evergreen songs</button>
+  </nav>
+
+  <main id="tab-overview" class="tabpage active">
+    <header><h1 id="ov-h1">you, in music</h1><p class="tag" id="ov-tag"></p></header>
+    <div class="cards" id="ov-cards"></div>
+    <section class="panel"><h2>Every single day</h2>
+      <p class="cap">One cell per day of your listening life — brighter means more scrobbles.</p>
+      <div id="fig-cal"></div></section>
+    <section class="panel"><h2>When you press play</h2>
+      <p class="cap">Scrobbles by hour of day and day of week (your local time).</p>
+      <div id="fig-clock"></div></section>
+    <section class="panel"><h2>The long run</h2>
+      <p class="cap">Monthly scrobbles with a 3-month rolling average.</p>
+      <div id="fig-vol"></div></section>
+    <section class="panel"><h2>The all-time charts</h2>
+      <p class="cap">Your 15 most scrobbled artists, tracks and albums.</p>
+      <div class="grid3">
+        <div><h3>Top Artists</h3><div id="fig-top-a"></div></div>
+        <div><h3>Top Tracks</h3><div id="fig-top-t"></div></div>
+        <div><h3>Top Albums</h3><div id="fig-top-al"></div></div>
+      </div></section>
+    <section class="panel"><h2>Your rotating obsessions</h2>
+      <p class="cap">Quarterly top-10 leaderboard — who was on top, and when.</p>
+      <div id="fig-bump"></div></section>
+    <section class="panel"><h2>How the leaderboard was built</h2>
+      <p class="cap">Cumulative scrobbles for your all-time top 8 artists.</p>
+      <div id="fig-cum"></div></section>
+    <section class="panel"><h2>Exploration vs. routine</h2>
+      <p class="cap">New artists discovered each month (bars) and total unique artists (line).</p>
+      <div id="fig-disc"></div></section>
+  </main>
+
+  <main id="tab-forgotten" class="tabpage">
+    <header><h1>Forgotten songs</h1><p class="tag" id="f-tag">Tracks you loved and left behind — ranked by
+      <b>days silent × √(lifetime plays × best-month plays)</b>, so short fierce obsessions outrank slow burns.</p></header>
+    <div class="cards" id="f-cards"></div>
+    <section class="panel"><h2>The top 25 most forgotten</h2>
+      <p class="cap" id="f-bar-cap"></p><div id="fig-forg-bar"></div></section>
+    <section class="panel"><h2>Plays vs. time gone</h2>
+      <p class="cap">Every eligible song, plotted by how much you played it and how long it's been.
+         The top-right corner is where nostalgia lives.</p>
+      <div id="fig-forg-sc"></div></section>
+    <section class="panel"><h2>The full list</h2>
+      <p class="cap" id="f-table-cap"></p><div id="f-table"></div></section>
+  </main>
+
+  <main id="tab-evergreen" class="tabpage">
+    <header><h1>Evergreen songs</h1><p class="tag">The ones that never left — ranked by
+      <b>months in rotation × coverage</b> (how many distinct months you played them, weighted by how
+      gaps-free that run was) · candidates: ≥30 plays, lifespan ≥ 1 year.</p></header>
+    <div class="cards" id="e-cards"></div>
+    <section class="panel"><h2>The top 25 evergreen</h2>
+      <p class="cap">Long relationships with few gaps, ranked by evergreen score.</p>
+      <div id="fig-ever-bar"></div></section>
+    <section class="panel"><h2>Long &amp; steady</h2>
+      <p class="cap">Every candidate by relationship length and consistency — bubble size is lifetime
+         plays. Top-right is where the lifers live.</p>
+      <div id="fig-ever-sc"></div></section>
+    <section class="panel"><h2>The full list</h2>
+      <p class="cap" id="e-table-cap"></p><div id="e-table"></div></section>
+  </main>
+
+  <footer id="app-footer"></footer>
+</div>
+
+<script>
+"use strict";
+/* =================================================================== config */
+const API = "https://ws.audioscrobbler.com/2.0/";
+const EMBEDDED_KEY = "__LASTFM_API_KEY__";
+const PAGE_SIZE = 200;
+const CONCURRENCY = 8;
+const FORG_MIN_PLAYS = 15, EVER_MIN_PLAYS = 30, EVER_MIN_LIFE = 365, RECENT_DAYS = 90;
+const TABLE_PREVIEW = 100, BAR_ROWS = 25;
+const EXCLUDE = new Set([["forget it","screwyounick"],["remember when","sam sun"]]
+  .map(([t,a]) => (t+"||"+a).toLowerCase()));
+
+const FONT = {family:"Inter, 'Segoe UI', system-ui, sans-serif", color:"#c9d4e0", size:13};
+const GRID = "rgba(130, 150, 175, 0.10)";
+const WARM = [[0,"#3a2438"],[0.35,"#8a2f45"],[0.65,"#e0523c"],[0.85,"#ff8c42"],[1,"#ffd07b"]];
+const COOL = [[0,"#235763"],[0.35,"#177f6f"],[0.65,"#0cb995"],[0.85,"#4cc9f0"],[1,"#c9f7e8"]];
+const CAL_SCALE = [[0,"#232a33"],[0.12,"#3d2a3f"],[0.30,"#712f49"],[0.50,"#b03a44"],
+                   [0.70,"#e85540"],[0.85,"#ff8c42"],[1,"#ffd07b"]];
+const PALETTE = ["#ff5964","#ff9f45","#ffd166","#06d6a0","#4cc9f0",
+                 "#7b8cde","#b388eb","#f72585","#90be6d","#e0aaff"];
+const YEAR_COLORS = ["#712f49","#a83745","#d94a3d","#f26b3d","#ff9e4a","#ffd07b"];
+const CFG = {displaylogo:false, responsive:true};
+
+/* ==================================================================== utils */
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmtN = n => n.toLocaleString("en-US");
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtDate(uts) { const d = new Date(uts*1000);
+  return MONTHS[d.getMonth()]+" "+String(d.getDate()).padStart(2,"0")+", "+d.getFullYear(); }
+function fmtSpan(days) {
+  if (days < 60) return days+" d";
+  if (days < 730) return Math.round(days/30.4)+" mo";
+  return (days/365.25).toFixed(1)+" y";
+}
+function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+  .replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0,n-1)+"…" : s; }
+function baseLayout(height) {
+  return { height, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+    font:FONT, margin:{l:12,r:12,t:26,b:12}, showlegend:false,
+    hoverlabel:{bgcolor:"#1c2330", bordercolor:"#3a4552",
+                font:{color:"#e6edf3", family:FONT.family}},
+    xaxis:{showgrid:false, zeroline:false, linecolor:"#2b3442", automargin:true},
+    yaxis:{showgrid:true, gridcolor:GRID, zeroline:false, linecolor:"#2b3442", automargin:true} };
+}
+function plot(id, traces, layout) { Plotly.newPlot($(id), traces, layout, CFG); }
+
+/* date helpers (visitor's local timezone) */
+const mKey = d => d.getFullYear()*12 + d.getMonth();
+const qKey = d => d.getFullYear()*4 + ((d.getMonth()/3)|0);
+const dKey = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const mLabel = m => MONTHS[m%12]+" "+((m/12)|0);
+const qLabel = q => ((q/4)|0)+" Q"+(q%4+1);
+
+/* ================================================================== idb cache */
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("lfm-cache", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("users");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(user) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const q = db.transaction("users").objectStore("users").get(user);
+    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+  });
+}
+async function idbSet(user, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const q = db.transaction("users","readwrite").objectStore("users").put(val, user);
+    q.onsuccess = () => res(); q.onerror = () => rej(q.error);
+  });
+}
+
+/* ==================================================================== fetch */
+let cancelled = false;
+async function apiPage(user, key, page, fromTs) {
+  const p = new URLSearchParams({method:"user.getrecenttracks", user,
+    api_key:key, limit:PAGE_SIZE, page:String(page), format:"json"});
+  if (fromTs) p.set("from", String(fromTs));
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    if (cancelled) throw new Error("cancelled");
+    let d = null;
+    try {
+      const r = await fetch(API + "?" + p);
+      d = await r.json();
+    } catch (e) { /* fall through to retry */ }
+    if (d && !d.error) return d;
+    const code = d && d.error;
+    if (code === 6) throw new Error("User not found — check the spelling.");
+    if (code === 4 || code === 10 || code === 26)
+      throw new Error("The API key was rejected. Set a valid one under “advanced”.");
+    if (attempt < 4) await sleep(2 ** attempt * 500);
+  }
+  throw new Error("last.fm is having trouble right now — try again in a bit.");
+}
+function parsePage(d) {
+  const out = [];
+  for (const t of (d.recenttracks.track || [])) {
+    if (!t.date) continue;  // now-playing
+    out.push([+t.date.uts, t.artist["#text"], t.album["#text"], t.name]);
+  }
+  return out;
+}
+async function fetchAll(user, key, fromTs, onProgress) {
+  const first = await apiPage(user, key, 1, fromTs);
+  const attr = first.recenttracks["@attr"];
+  const totalPages = +attr.totalPages || 0;
+  let rows = parsePage(first), done = 1;
+  onProgress(done, Math.max(totalPages,1), rows.length);
+  const queue = [];
+  for (let p = 2; p <= totalPages; p++) queue.push(p);
+  await Promise.all(Array.from({length: CONCURRENCY}, async () => {
+    while (queue.length && !cancelled) {
+      const pg = queue.shift();
+      rows = rows.concat(parsePage(await apiPage(user, key, pg, fromTs)));
+      onProgress(++done, totalPages, rows.length);
+    }
+  }));
+  if (cancelled) throw new Error("cancelled");
+  return rows;
+}
+
+/* =================================================================== compute */
+let S = null;  // all computed stats, built once per load
+
+function compute(rows) {
+  const s = { total: rows.length };
+  const artists = new Set(), albums = new Set(), tracks = new Set();
+  const dayCounts = new Map(), hourCounts = new Map(), monthCounts = new Map();
+  const artistCounts = new Map(), pairCounts = new Map(), albumCounts = new Map();
+  const firstSeen = new Map();   // artist -> uts
+  let minUts = Infinity, maxUts = 0;
+
+  for (const [uts, artist, album, track] of rows) {
+    const d = new Date(uts*1000);
+    if (uts < minUts) minUts = uts;
+    if (uts > maxUts) maxUts = uts;
+    artists.add(artist); tracks.add(track); if (album) albums.add(album);
+    dayCounts.set(dKey(d), (dayCounts.get(dKey(d))||0) + 1);
+    hourCounts.set(d.getHours(), (hourCounts.get(d.getHours())||0) + 1);
+    const mk = mKey(d);
+    monthCounts.set(mk, (monthCounts.get(mk)||0) + 1);
+    artistCounts.set(artist, (artistCounts.get(artist)||0) + 1);
+    const pk = track+"||"+artist;
+    pairCounts.set(pk, (pairCounts.get(pk)||0) + 1);
+    if (album) { const ak = album+"||"+artist;
+      albumCounts.set(ak, (albumCounts.get(ak)||0) + 1); }
+    if (!firstSeen.has(artist) || uts < firstSeen.get(artist)) firstSeen.set(artist, uts);
+  }
+  Object.assign(s, {artists, albums, tracks, dayCounts, hourCounts, monthCounts,
+                    artistCounts, pairCounts, albumCounts, firstSeen, minUts, maxUts});
+
+  // clock heatmap: 7 days x 24 hours (Mon=0)
+  const heat = Array.from({length:7}, () => new Array(24).fill(0));
+  for (const [uts] of rows) { const d = new Date(uts*1000);
+    heat[(d.getDay()+6)%7][d.getHours()]++; }
+  s.heat = heat;
+
+  // per-song stats (forgotten + evergreen)
+  const bySong = new Map();
+  const monthSet = new Map(), peakMap = new Map(), qHistMap = new Map();
+  for (const [uts, artist, album, track] of rows) {
+    const k = track+"||"+artist;
+    if (EXCLUDE.has(k.toLowerCase())) continue;
+    const d = new Date(uts*1000), mk = mKey(d), qk = qKey(d);
+    let e = bySong.get(k);
+    if (!e) { e = {track, artist, plays:0, first:uts, last:uts}; bySong.set(k, e); }
+    e.plays++; if (uts < e.first) e.first = uts; if (uts > e.last) e.last = uts;
+    if (!monthSet.has(k)) monthSet.set(k, new Set());
+    monthSet.get(k).add(mk);
+    const pmk = k+"|"+mk;
+    peakMap.set(pmk, (peakMap.get(pmk)||0) + 1);
+    const qh = qHistMap.get(k) || {}; qh[qk] = (qh[qk]||0) + 1; qHistMap.set(k, qh);
+  }
+  const refMs = maxUts*1000, refM = mKey(new Date(refMs));
+  for (const [k, e] of bySong) {
+    e.daysGone = ((refMs - e.last*1000) / 86400000) | 0;
+    e.lifespan = ((e.last - e.first) / 86400000) | 0;
+    let peakM = 0, peakN = 0;
+    for (const mk of monthSet.get(k)) {
+      const n = peakMap.get(k+"|"+mk) || 0;
+      if (n > peakN) { peakN = n; peakM = mk; }
+    }
+    e.peakMonth = peakM; e.peakPlays = peakN;
+    e.activeMonths = monthSet.get(k).size;
+    e.availMonths = refM - mKey(new Date(e.first*1000)) + 1;
+    e.coverage = e.activeMonths / e.availMonths;
+    e.alive = (refMs - e.last*1000) / 86400000 <= RECENT_DAYS;
+    e.forgScore = e.daysGone * Math.sqrt(e.plays * e.peakPlays);
+    e.everScore = e.activeMonths * e.coverage;
+  }
+  s.bySong = bySong; s.qHistMap = qHistMap; s.refMs = refMs;
+  return s;
+}
+
+/* ==================================================================== render */
+function cards(el, cards) {
+  $(el).innerHTML = cards.map(([v,l,s2]) =>
+    `<div class="card"><div class="num">${v}</div><div class="lbl">${l}</div>
+     <div class="sub2">${s2}</div></div>`).join("");
+}
+
+function sparkline(qh, fullQ) {
+  const vals = fullQ.map(q => qh[q] || 0);
+  const vmax = Math.max(...vals, 1);
+  let rects = "";
+  vals.forEach((v, i) => {
+    const rel = Math.sqrt(v / vmax);
+    const h = 2 + 24*rel, op = 0.22 + 0.78*rel, q = fullQ[i];
+    rects += `<rect x='${i*4}' y='${(26-h).toFixed(1)}' width='3' height='${h.toFixed(1)}'
+      fill='#ff8c42' opacity='${op.toFixed(2)}'><title>${qLabel(q)}: ${v} plays</title></rect>`;
+  });
+  return `<svg class='spark' width='${vals.length*4}' height='26'>${rects}</svg>`;
+}
+
+function renderOverview(user) {
+  const spanDays = Math.round((S.maxUts - S.minUts)/86400) + 1;
+  const daysSorted = [...S.dayCounts.keys()].sort();
+  // streak
+  let best = [daysSorted[0]], run = [daysSorted[0]];
+  for (let i = 1; i < daysSorted.length; i++) {
+    const diff = (new Date(daysSorted[i]) - new Date(daysSorted[i-1])) / 86400000;
+    run = diff === 1 ? run.concat(daysSorted[i]) : [daysSorted[i]];
+    if (run.length > best.length) best = run;
+  }
+  const [bigDay, bigDayN] = [...S.dayCounts.entries()].sort((a,b)=>b[1]-a[1])[0];
+  const topA = [...S.artistCounts.entries()].sort((a,b)=>b[1]-a[1]);
+  const topP = [...S.pairCounts.entries()].sort((a,b)=>b[1]-a[1]);
+  const [tPk, tPn] = topP[0]; const [tPt, tPa] = tPk.split("||");
+  const peakHour = [...S.hourCounts.entries()].sort((a,b)=>b[1]-a[1])[0][0];
+  const night = 100 * [0,1,2,3,4,5].reduce((n,h)=>n+(S.hourCounts.get(h)||0),0) / S.total;
+  const yearSpan = ((new Date(S.maxUts*1000)).getFullYear() - (new Date(S.minUts*1000)).getFullYear()) || 1;
+
+  $("ov-h1").textContent = `${yearSpan > 1 ? yearSpan+" years" : "A year"} of you, in music`;
+  $("ov-tag").innerHTML = `<b>${esc(user)}</b> &nbsp;·&nbsp; ${fmtN(S.total)} scrobbles
+    &nbsp;·&nbsp; ${fmtDate(S.minUts)} – ${fmtDate(S.maxUts)} &nbsp;·&nbsp;
+    ${fmtN(S.artists.size)} artists &nbsp;·&nbsp; times in your local timezone`;
+  cards("ov-cards", [
+    [fmtN(S.total), "Total scrobbles", `${fmtDate(S.minUts)} → ${fmtDate(S.maxUts)}`],
+    [fmtN(S.artists.size), "Unique artists", `${fmtN(S.albums.size)} albums · ${fmtN(S.tracks.size)} tracks`],
+    [fmtN(daysSorted.length), "Days with music", `of ${fmtN(spanDays)} days (${(100*daysSorted.length/spanDays).toFixed(0)}%)`],
+    [fmtN(Math.round(S.total/spanDays)), "Scrobbles per day", `peak hour: ${String(peakHour).padStart(2,"0")}:00 local`],
+    [fmtN(best.length), "Longest streak (days)", `${fmtDate(+new Date(best[0])/1000)} → ${fmtDate(+new Date(best[best.length-1])/1000)}`],
+    [fmtN(bigDayN), "Biggest day", fmtDate(+new Date(bigDay)/1000)],
+    [esc(trunc(topA[0][0],26)), "Top artist", `${fmtN(topA[0][1])} scrobbles`],
+    [esc(trunc(tPt,26)), "Top track", `${fmtN(tPn)} plays · ${esc(trunc(tPa,22))}`],
+    [`${String(peakHour).padStart(2,"0")}:00`, "Peak listening hour", "your local time"],
+    [`${night.toFixed(0)}%`, "Night owl score", "scrobbles between midnight and 6am"],
+  ]);
+
+  renderCalendar(); renderClock(); renderVolume(); renderTopCharts();
+  renderBump(topA); renderCumulative(topA); renderDiscovery();
+}
+
+function renderCalendar() {
+  const years = new Set();
+  for (const k of S.dayCounts.keys()) years.add(+k.slice(0,4));
+  const zmax = Math.max(2, percentile([...S.dayCounts.values()], 97));
+  const minD = dKey(new Date(S.minUts*1000)), maxD = dKey(new Date(S.maxUts*1000));
+  $("fig-cal").innerHTML = [...years].sort().map(y => `<div class="cal-year" id="cal-${y}"></div>`).join("");
+  for (const y of [...years].sort()) {
+    const first = new Date(y,0,1), last = new Date(y,11,31);
+    const offset = (first.getDay()+6)%7;
+    const firstMon = new Date(first - offset*86400000);
+    const ncols = Math.floor((last - firstMon)/86400000/7) + 1;
+    const z = Array.from({length:7}, () => Array(ncols).fill(null));
+    const txt = Array.from({length:7}, () => Array(ncols).fill(""));
+    for (let d = new Date(first); d <= last; d = new Date(+d + 86400000)) {
+      const col = Math.floor((d - firstMon)/86400000/7), row = (d.getDay()+6)%7;
+      const key = dKey(d);
+      if (key < minD || key > maxD) continue;
+      const v = S.dayCounts.get(key) || 0;
+      z[row][col] = v;
+      txt[row][col] = `${d.toLocaleDateString("en-US",{weekday:"short"})}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}<br>${v ? fmtN(v)+" scrobbles" : "No scrobbles"}`;
+    }
+    const anns = [];
+    for (let m = 0; m < 12; m++) {
+      const col = Math.floor((new Date(y,m,1) - firstMon)/86400000/7);
+      anns.push({x:col, y:1.12, xref:"x", yref:"paper", text:MONTHS[m], showarrow:false,
+                 font:{size:9.5, color:"#6d7a89"}, xanchor:"left"});
+    }
+    plot("cal-"+y, [{
+      type:"heatmap", z, text:txt, hoverinfo:"text",
+      colorscale:CAL_SCALE, zmin:0, zmax, xgap:2, ygap:2,
+      showscale: y === Math.max(...years),
+      colorbar:{thickness:9, len:0.9, outlinewidth:0, tickfont:{size:10, color:"#8b98a8"}}
+    }], { ...baseLayout(150), annotations: anns,
+      margin:{l:12,r:12,t:24,b:6},
+      xaxis:{showgrid:false, zeroline:false, showticklabels:false, range:[-0.5, ncols-0.5]},
+      yaxis:{autorange:"reversed", showgrid:false, zeroline:false, automargin:true,
+             title:{text:String(y), font:{size:13, color:"#8b98a8"}},
+             tickvals:[0,2,4,6], ticktext:["Mon","Wed","Fri","Sun"],
+             tickfont:{size:9.5, color:"#6d7a89"}} });
+  }
+}
+function percentile(arr, p) {
+  const a = [...arr].sort((x,y)=>x-y);
+  return a[Math.min(a.length-1, Math.floor(p/100*a.length))];
+}
+
+function renderClock() {
+  const days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  plot("fig-clock", [{
+    type:"heatmap", z:[...S.heat].reverse(), x:[...Array(24).keys()], y:[...days].reverse(),
+    colorscale:CAL_SCALE, xgap:3, ygap:3,
+    hovertemplate:"%{y}, %{x}:00 – %{z:,} scrobbles<extra></extra>",
+    colorbar:{thickness:9, outlinewidth:0, tickfont:{size:10, color:"#8b98a8"}}
+  }], { ...baseLayout(330),
+    xaxis:{tickmode:"array", tickvals:[0,2,4,6,8,10,12,14,16,18,20,22],
+           ticktext:["00","02","04","06","08","10","12","14","16","18","20","22"],
+           tickfont:{size:9.5, color:"#6d7a89"}, showgrid:false, zeroline:false},
+    yaxis:{showgrid:false, tickfont:{size:11}, zeroline:false} });
+}
+
+function renderVolume() {
+  const keys = [...S.monthCounts.keys()].sort((a,b)=>a-b);
+  const x = keys.map(m => new Date(((m/12)|0), m%12, 1));
+  const y = keys.map(m => S.monthCounts.get(m));
+  const roll = y.map((_, i) => {
+    const slice = y.slice(Math.max(0, i-2), i+1);
+    return slice.reduce((a,b)=>a+b,0) / slice.length;
+  });
+  const colors = x.map(d => YEAR_COLORS[Math.min(years().indexOf(d.getFullYear()), YEAR_COLORS.length-1)]);
+  plot("fig-vol", [
+    {type:"bar", x, y, marker:{color:colors}, hovertemplate:"%{x|%b %Y} – %{y:,} scrobbles<extra></extra>"},
+    {type:"scatter", x, y:roll, mode:"lines", line:{color:"#e6edf3", width:2},
+     hovertemplate:"3-month avg: %{y:,.0f}<extra></extra>"}
+  ], { ...baseLayout(330), bargap:0.25,
+    xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"}, showgrid:false, zeroline:false},
+    yaxis:{showgrid:true, gridcolor:GRID, zeroline:false} });
+}
+function years() { return [...new Set([...S.monthCounts.keys()].map(m => (m/12)|0))].sort(); }
+
+function renderTopCharts() {
+  const panels = [
+    ["fig-top-a", [...S.artistCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15)
+      .map(([k,v]) => [esc(trunc(k,28)), v, k])],
+    ["fig-top-t", [...S.pairCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15)
+      .map(([k,v]) => { const [t,a] = k.split("||"); return [`${esc(trunc(t,24))}<br>${esc(trunc(a,24))}`, v, `${t} · ${a}`]; })],
+    ["fig-top-al", [...S.albumCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15)
+      .map(([k,v]) => { const [t,a] = k.split("||"); return [`${esc(trunc(t,24))}<br>${esc(trunc(a,24))}`, v, `${t} · ${a}`]; })],
+  ];
+  for (const [id, rows] of panels) {
+    const vals = rows.map(r=>r[1]), vmin = Math.min(...vals), vmax = Math.max(...vals);
+    const tcol = vals.map(v => (v-vmin)/Math.max(1,vmax-vmin) > 0.55 ? "#20293a" : "#e6edf3");
+    plot(id, [{
+      type:"bar", orientation:"h",
+      y: rows.map(r=>r[0]).reverse(), x: [...vals].reverse(),
+      marker:{color:[...vals].reverse(), colorscale:WARM, cmin:vmin, cmax:vmax},
+      text:[...vals].reverse().map(v=>fmtN(v)), textposition:"inside", insidetextanchor:"end",
+      textfont:{size:10.5, color:[...tcol].reverse()},
+      hovertemplate:"%{x:,} scrobbles<extra></extra>"
+    }], { ...baseLayout(460), margin:{l:6,r:6,t:6,b:6},
+      xaxis:{showgrid:false, showticklabels:false, zeroline:false, range:[0, vmax*1.02]},
+      yaxis:{automargin:true, showgrid:false, zeroline:false, tickfont:{size:10}} });
+  }
+}
+
+function renderBump(topA) {
+  const top10 = topA.slice(0,10).map(e=>e[0]);
+  const qset = new Set();
+  for (const k of S.monthCounts.keys()) qset.add(qKey(new Date(((k/12)|0), k%12, 1)));
+  const qs = [...qset].sort((a,b)=>a-b);
+  const counts = new Map(); // quarter -> Map(artist -> n)
+  for (const q of qs) counts.set(q, new Map(top10.map(a=>[a,0])));
+  for (const [k, e] of S.bySong) {
+    if (!top10.includes(e.artist)) continue;
+    for (const [q, n] of Object.entries(S.qHistMap.get(k) || {})) {
+      const m = counts.get(+q); if (m) m.set(e.artist, m.get(e.artist) + n);
+    }
+  }
+  const nq = qs.length;
+  const traces = top10.map((a, j) => {
+    const ranks = qs.map(q => {
+      const m = counts.get(q);
+      return 1 + top10.filter(o => m.get(o) > m.get(a) || (m.get(o) === m.get(a) && o < a)).length;
+    });
+    const text = qs.map((q,i) => `${a}<br>${qLabel(q)} – rank #${ranks[i]} (${fmtN(counts.get(q).get(a))} scrobbles)`);
+    return {type:"scatter", x:[...Array(nq).keys()], y:ranks, mode:"lines+markers",
+            line:{color:PALETTE[j], width:2.5}, marker:{size:7}, hoverinfo:"text", text};
+  });
+  const anns = top10.map((a,j) => ({
+    x:nq-1+0.35, y:traces[j].y[nq-1], text:esc(trunc(a,18)), showarrow:false, xanchor:"left",
+    font:{size:11, color:PALETTE[j]} }));
+  const tq1 = qs.map((q,i)=>[q,i]).filter(([q]) => q%4===0);
+  plot("fig-bump", traces, { ...baseLayout(420), annotations:anns,
+    xaxis:{tickmode:"array", tickvals:tq1.map(e=>e[1]), ticktext:tq1.map(e=>String((e[0]/4)|0)),
+           range:[-0.6, nq+3.2], tickfont:{size:11, color:"#8b98a8"}, showgrid:false, zeroline:false},
+    yaxis:{autorange:"reversed", dtick:1, range:[10.6,0.4], tickvals:[1,2,3,4,5,6,7,8,9,10],
+           showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}} });
+}
+
+function renderCumulative(topA) {
+  const top8 = topA.slice(0,8).map(e=>e[0]);
+  const ms = [...S.monthCounts.keys()].sort((a,b)=>a-b);
+  const x = ms.map(m => new Date(((m/12)|0), m%12, 1));
+  const perMonth = new Map(top8.map(a=>[a, new Map()]));
+  for (const [k, md] of S.monthDetail) {
+    const artist = k.split("||")[1];
+    if (!top8.includes(artist)) continue;
+    for (const [m, n] of md) perMonth.get(artist).set(m, (perMonth.get(artist).get(m)||0) + n);
+  }
+  const traces = [], anns = [];
+  let ymax = 0;
+  top8.forEach((a, j) => {
+    let c = 0; const y = ms.map(m => c += perMonth.get(a).get(m) || 0);
+    ymax = Math.max(ymax, y[y.length-1]);
+    traces.push({type:"scatter", x, y, mode:"lines", line:{color:PALETTE[j], width:2.5},
+                 hovertemplate:`${a} – %{y:,} total<extra></extra>`});
+    anns.push({a, v:y[y.length-1], c:PALETTE[j]});
+  });
+  anns.sort((p,q)=>q.v-p.v);
+  const minGap = ymax * 0.055; let prev = null;
+  for (const an of anns) {
+    an.ly = prev === null ? an.v : Math.min(an.v, prev - minGap); prev = an.ly;
+  }
+  plot("fig-cum", traces, { ...baseLayout(400),
+    annotations: anns.map(an => ({x:x[x.length-1], y:an.ly,
+      text:` ${esc(trunc(an.a,16))} (${fmtN(an.v)})`, showarrow:false, xanchor:"left",
+      xshift:6, font:{size:11, color:an.c}})),
+    margin:{l:12, r:150, t:26, b:12},
+    xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"}, range:[x[0], x[x.length-1]], showgrid:false, zeroline:false},
+    yaxis:{showgrid:true, gridcolor:GRID, zeroline:false} });
+}
+
+function renderDiscovery() {
+  const ms = [...S.monthCounts.keys()].sort((a,b)=>a-b);
+  const newPer = new Map(ms.map(m=>[m,0]));
+  for (const [a, uts] of S.firstSeen) {
+    const m = mKey(new Date(uts*1000));
+    if (newPer.has(m)) newPer.set(m, newPer.get(m)+1);
+  }
+  const x = ms.map(m => new Date(((m/12)|0), m%12, 1));
+  const yb = ms.map(m => newPer.get(m));
+  let c = 0; const yl = yb.map(v => c += v);
+  plot("fig-disc", [
+    {type:"bar", x, y:yb, marker:{color:"#e85540"}, opacity:0.85,
+     hovertemplate:"%{x|%b %Y} – %{y} new artists<extra></extra>"},
+    {type:"scatter", x, y:yl, mode:"lines", line:{color:"#4cc9f0", width:2.5}, yaxis:"y2",
+     hovertemplate:"%{y:,} artists total<extra></extra>"}
+  ], { ...baseLayout(340), bargap:0.25,
+    xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"}, showgrid:false, zeroline:false},
+    yaxis:{tickfont:{size:10.5, color:"#e85540"}, showgrid:true, gridcolor:GRID, zeroline:false},
+    yaxis2:{overlaying:"y", side:"right", showgrid:false, tickfont:{size:10.5, color:"#4cc9f0"}} });
+}
+
+/* ------------------------------------------------------------- ranked bars */
+function rankedBar(id, rows, scale, fmtScore, hoverFn) {
+  const b = [...rows].reverse();
+  const vals = b.map(r => r.score);
+  const vmin = Math.min(...vals), vmax = Math.max(...vals);
+  const tcol = vals.map(v => (v-vmin)/Math.max(1e-9, vmax-vmin) > 0.55 ? "#20293a" : "#e6edf3");
+  const anns = b.map((r, i) => ({
+    x:0, y:i+0.30, xanchor:"left", yanchor:"bottom", showarrow:false,
+    text:`<b>${esc(trunc(r.track,34))}</b> · ${esc(trunc(r.artist,26))}`,
+    font:{size:12, color:"#e6edf3"} }));
+  plot(id, [{
+    type:"bar", y:[...b.keys()], x:vals, orientation:"h", width:0.5,
+    marker:{color:vals, colorscale:scale, cmin:vmin, cmax:vmax},
+    text:vals.map(fmtScore), textposition:"inside", insidetextanchor:"end",
+    textfont:{size:11, color:tcol},
+    customdata:b.map(hoverFn), hovertemplate:"%{customdata}<extra></extra>"
+  }], { ...baseLayout(34*b.length + 76), annotations:anns,
+    xaxis:{showticklabels:false, range:[0, vmax*1.02], showgrid:false, zeroline:false},
+    yaxis:{showticklabels:false, showgrid:false, zeroline:false, range:[-0.6, b.length-1+0.78]} });
+}
+
+/* -------------------------------------------------------------- forgotten */
+function renderForgotten() {
+  const cand = [...S.bySong.values()].filter(e => e.plays >= FORG_MIN_PLAYS && e.forgScore > 0)
+    .sort((a,b) => b.forgScore - a.forgScore);
+  cand.forEach(e => e.score = e.forgScore);
+  if (!cand.length) {
+    cards("f-cards", [["—", "Nothing here yet", `no songs with ≥${FORG_MIN_PLAYS} plays`]]);
+    $("f-table-cap").textContent = "Not enough listening history for forgotten songs yet.";
+    return;
+  }
+  const dust = cand.filter(e => e.daysGone >= 365);
+  const top = cand[0], big = [...dust].sort((a,b)=>b.plays-a.plays)[0];
+  cards("f-cards", [
+    [fmtN(dust.length), "Songs gathering dust", `≥${FORG_MIN_PLAYS} plays, unheard for 1+ year`],
+    [fmtN(dust.reduce((n,e)=>n+e.plays,0)), "Plays locked in them", "lifetime plays of those songs"],
+    [esc(trunc(top.track,24)), "Most forgotten", `${fmtN(top.plays)} plays · peak ${mLabel(top.peakMonth)}`],
+    [esc(trunc(big.track,24)), "Biggest hit you've dropped", `${fmtN(big.plays)} plays · last ${fmtDate(big.last)}`],
+  ]);
+  $("f-bar-cap").textContent = `Songs with at least ${FORG_MIN_PLAYS} lifetime plays, ranked by forgotten score.`;
+  $("f-table-cap").textContent = `All ${fmtN(cand.length)} eligible songs — top ${TABLE_PREVIEW} shown by default, search or hit “show all”. Hover the mini charts for quarterly plays.`;
+  rankedBar("fig-forg-bar", cand.slice(0, BAR_ROWS), WARM, s => `${(s/1000).toFixed(0)}k`, r =>
+    `<b>${esc(r.track)}</b> · ${esc(r.artist)}<br>forgotten score ${fmtN(Math.round(r.score))}<br>`+
+    `${fmtN(r.plays)} plays · gone ${fmtN(r.daysGone)} days<br>last heard ${fmtDate(r.last)}<br>`+
+    `peak: ${mLabel(r.peakMonth)} (${r.peakPlays} plays)`);
+  plot("fig-forg-sc", [{
+    type:"scatter", mode:"markers", x:cand.map(e=>e.plays), y:cand.map(e=>e.daysGone),
+    marker:{size:6.5, color:cand.map(e=>e.score), colorscale:WARM, opacity:0.75,
+            cmin:Math.min(...cand.map(e=>e.score)), cmax:Math.max(...cand.map(e=>e.score)),
+            colorbar:{title:{text:"score", font:{size:11, color:"#8b98a8"}}, thickness:9,
+                      outlinewidth:0, tickfont:{size:10, color:"#8b98a8"}}},
+    text:cand.map(e=>`${esc(e.track)} · ${esc(e.artist)}`),
+    customdata:cand.map(e=>[e.plays, e.daysGone, fmtDate(e.last)]),
+    hovertemplate:"%{text}<br>%{customdata[0]:,} plays · gone %{customdata[1]:,} days<br>last heard %{customdata[2]}<extra></extra>"
+  }], { ...baseLayout(430),
+    xaxis:{type:"log", tickmode:"array", tickvals:[15,25,50,100,200,500,1000],
+           ticktext:["15","25","50","100","200","500","1000"],
+           title:{text:"lifetime plays (log scale)", font:{size:11.5, color:"#8b98a8"}},
+           showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}},
+    yaxis:{title:{text:"days since last play", font:{size:11.5, color:"#8b98a8"}},
+           showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}} });
+
+  const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
+  const maxS = top.score;
+  const rows = cand.map((e, i) => {
+    const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
+    const w = 4 + 96*e.score/maxS;
+    const key = esc((e.track+" "+e.artist).toLowerCase());
+    return `<tr${i>=TABLE_PREVIEW?" class='extra'":""} data-s="${key}">
+      <td class='rank ${rc}'>${i+1}</td>
+      <td class='song'>${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
+      <td class='num-c'>${fmtN(e.plays)}</td>
+      <td>${mLabel(e.peakMonth)} <span class='dim'>(${e.peakPlays}×)</span></td>
+      <td>${fmtDate(e.last)}</td><td>${fmtN(e.daysGone)}</td>
+      <td class='dim'>${fmtSpan(e.lifespan)}</td>
+      <td>${sparkline(S.qHistMap.get(e.track+"||"+e.artist) || {}, fullQ)}</td>
+      <td><div class='scorewrap'><div class='scorebar' style='width:${w.toFixed(0)}%'></div>
+      <span>${fmtN(Math.round(e.score))}</span></div></td></tr>`;
+  }).join("");
+  $("f-table").innerHTML = tableShell("forg", cand.length,
+    `<th>#</th><th>Song</th><th>Artist</th><th>Plays</th><th>Peak month</th><th>Last heard</th>
+     <th>Days gone</th><th title='First play to last play'>Lifespan</th><th>History</th>
+     <th style='width:20%' title='days silent × √(lifetime plays × best-month plays)'>Forgotten score</th>`, rows);
+  wireTable("forg");
+}
+
+/* -------------------------------------------------------------- evergreen */
+function renderEvergreen() {
+  const cand = [...S.bySong.values()]
+    .filter(e => e.plays >= EVER_MIN_PLAYS && e.lifespan >= EVER_MIN_LIFE)
+    .sort((a,b) => b.everScore - a.everScore || b.activeMonths - a.activeMonths);
+  cand.forEach(e => e.score = e.everScore);
+  if (!cand.length) {
+    cards("e-cards", [["—", "Nothing here yet", "no year-long song relationships yet"]]);
+    $("e-table-cap").textContent = "Keep listening — evergreen songs need a year of history.";
+    return;
+  }
+  const long = [...cand].sort((a,b)=>b.lifespan-a.lifespan)[0];
+  const steady = [...cand].filter(e=>e.lifespan >= 2*365)
+    .sort((a,b)=>b.coverage-a.coverage || b.activeMonths-a.activeMonths)[0];
+  cards("e-cards", [
+    [fmtN(cand.length), "Long-term relationships", `≥${EVER_MIN_PLAYS} plays · in rotation 1+ year`],
+    [fmtN(cand.filter(e=>e.alive).length), "Still in rotation", `played in the last ${RECENT_DAYS} days`],
+    [esc(trunc(long.track,24)), "Longest relationship", `${fmtSpan(long.lifespan)} · ${esc(trunc(long.artist,20))}`],
+    [esc(trunc(steady.track,24)), "Most reliable", `played in ${(100*steady.coverage).toFixed(0)}% of ${steady.availMonths} months`],
+  ]);
+  $("e-table-cap").innerHTML = `All ${fmtN(cand.length)} candidates — type to filter, hover the mini charts for quarterly plays. <span class='alive'></span> = played in the last ${RECENT_DAYS} days.`;
+  rankedBar("fig-ever-bar", cand.slice(0, BAR_ROWS), COOL, s => s.toFixed(1), r =>
+    `<b>${esc(r.track)}</b> · ${esc(r.artist)}<br>evergreen score ${r.score.toFixed(1)}<br>`+
+    `${fmtN(r.plays)} plays · ${fmtN(r.lifespan)} days between first and last<br>`+
+    `played in ${r.activeMonths} of ${r.availMonths} months (${(100*r.coverage).toFixed(0)}%)<br>`+
+    `last heard ${fmtDate(r.last)}`);
+  plot("fig-ever-sc", [{
+    type:"scatter", mode:"markers",
+    x:cand.map(e=>e.lifespan/365.25), y:cand.map(e=>100*e.coverage),
+    marker:{size:cand.map(e=>e.plays), sizemode:"area",
+            sizeref:2*Math.max(...cand.map(e=>e.plays))/(26*26), sizemin:4,
+            color:cand.map(e=>e.score), colorscale:COOL, opacity:0.8,
+            cmin:Math.min(...cand.map(e=>e.score)), cmax:Math.max(...cand.map(e=>e.score)),
+            colorbar:{title:{text:"score", font:{size:11, color:"#8b98a8"}}, thickness:9,
+                      outlinewidth:0, tickfont:{size:10, color:"#8b98a8"}}},
+    text:cand.map(e=>`${esc(e.track)} · ${esc(e.artist)}`),
+    customdata:cand.map(e=>[e.plays, e.activeMonths, e.availMonths, fmtDate(e.last)]),
+    hovertemplate:"%{text}<br>%{customdata[0]:,} plays · %{customdata[1]} of %{customdata[2]} months<br>%{x:.1f} years between first and last · %{y:.0f}% coverage<br>last heard %{customdata[3]}<extra></extra>"
+  }], { ...baseLayout(430),
+    xaxis:{title:{text:"years between first and last play", font:{size:11.5, color:"#8b98a8"}},
+           showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}},
+    yaxis:{title:{text:"% of months with a play", font:{size:11.5, color:"#8b98a8"}},
+           ticksuffix:"%", range:[0,102], showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}} });
+
+  const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
+  const maxS = cand[0].score;
+  const rows = cand.map((e, i) => {
+    const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
+    const w = 4 + 96*e.score/maxS;
+    const key = esc((e.track+" "+e.artist).toLowerCase());
+    const dot = e.alive ? `<span class='alive' title='played in the last ${RECENT_DAYS} days'></span>` : "";
+    return `<tr${i>=TABLE_PREVIEW?" class='extra'":""} data-s="${key}">
+      <td class='rank ${rc}'>${i+1}</td>
+      <td class='song'>${dot}${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
+      <td class='num-c'>${fmtN(e.plays)}</td>
+      <td>${fmtDate(e.first)}</td><td>${fmtDate(e.last)}</td>
+      <td class='dim'>${fmtSpan(e.lifespan)}</td>
+      <td>${e.activeMonths}<span class='dim'> / ${e.availMonths}</span></td>
+      <td>${(100*e.coverage).toFixed(0)}%</td>
+      <td>${sparkline(S.qHistMap.get(e.track+"||"+e.artist) || {}, fullQ)}</td>
+      <td><div class='scorewrap'><div class='scorebar' style='width:${w.toFixed(0)}%'></div>
+      <span>${e.score.toFixed(1)}</span></div></td></tr>`;
+  }).join("");
+  $("e-table").innerHTML = tableShell("ever", cand.length,
+    `<th>#</th><th>Song</th><th>Artist</th><th>Plays</th><th>First heard</th><th>Last heard</th>
+     <th>Lifespan</th><th title='Distinct months with a play / months since first play'>In rotation</th>
+     <th title='Months with a play as % of months since first play'>Coverage</th><th>History</th>
+     <th style='width:16%' title='months in rotation × coverage'>Evergreen score</th>`, rows);
+  wireTable("ever");
+}
+
+/* --------------------------------------------------------- table machinery */
+function tableShell(prefix, n, head, rows) {
+  return `<div class='tbl-controls'>
+    <input id='q_${prefix}' class='search' type='text' placeholder='Search title or artist…' autocomplete='off'>
+    <span id='match_${prefix}' class='matches'></span>
+    <button class='btn' id='btn_${prefix}'></button></div>
+    <table id='ftable_${prefix}' data-n='${fmtN(n)}'><thead><tr>${head}</tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+function wireTable(prefix) {
+  const input = $("q_"+prefix), btn = $("btn_"+prefix), match = $("match_"+prefix),
+        table = $("ftable_"+prefix);
+  let showAll = false;
+  function apply() {
+    const s = input.value.toLowerCase();
+    let n = 0;
+    table.querySelectorAll("tbody tr").forEach(tr => {
+      const ok = tr.dataset.s.includes(s) && (showAll || !tr.classList.contains("extra"));
+      tr.classList.toggle("revealed", ok);
+      if (ok) n++;
+    });
+    match.textContent = s ? fmtN(n) + " found" : "";
+    btn.textContent = showAll ? "Show top " + TABLE_PREVIEW
+                              : "Show all " + table.dataset.n + " songs";
+  }
+  input.addEventListener("input", apply);
+  btn.addEventListener("click", () => { showAll = !showAll; apply(); });
+  apply();
+}
+
+/* ================================================================ tabs/main */
+document.querySelectorAll(".tab").forEach(btn =>
+  btn.addEventListener("click", () => activate(btn.dataset.tab)));
+$("brand").addEventListener("click", () => {
+  history.replaceState(null, "", location.pathname);
+  $("app").style.display = "none";
+  $("landing").classList.remove("hidden");
+});
+function activate(name) {
+  document.querySelectorAll(".tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tabpage").forEach(p =>
+    p.classList.toggle("active", p.id === "tab-" + name));
+  document.body.dataset.tab = name;
+  document.querySelectorAll("#tab-" + name + " .js-plotly-plot")
+    .forEach(gd => Plotly.Plots.resize(gd));
+  window.scrollTo({top:0});
+}
+
+function getKey() {
+  return localStorage.getItem("lfm_key") || EMBEDDED_KEY;
+}
+function showErr(msg) {
+  const e = $("landing-err"); e.textContent = msg; e.style.display = "block";
+}
+
+async function load(user, range) {
+  cancelled = false;
+  $("landing-err").style.display = "none";
+  $("landing").classList.add("hidden");
+  $("loading").classList.remove("hidden");
+  const key = getKey();
+  try {
+    const cached = await idbGet(user).catch(() => null);
+    let rows = cached ? cached.rows : [];
+    let scope = cached ? cached.scope : null;
+    let fromTs = null;
+    if (range === "full" && scope !== "full") rows = [];       // need everything
+    if (rows.length) fromTs = rows.reduce((m,r) => Math.max(m, r[0]), 0) + 1;
+    else if (range === "1y") fromTs = Math.floor(Date.now()/1000) - 365*86400;
+    const newRows = await fetchAll(user, key, fromTs, (done, total, n) => {
+      $("load-fill").style.width = (100*done/total).toFixed(1) + "%";
+      $("load-pages").textContent = `page ${fmtN(done)} / ${fmtN(total)}`;
+      $("load-count").textContent = `${fmtN(n)} scrobbles`;
+    });
+    if (newRows.length) {
+      const merged = new Map();
+      for (const r of rows.concat(newRows)) merged.set(r[0]+"|"+r[3]+"|"+r[1], r);
+      rows = [...merged.values()];
+      await idbSet(user, {rows, scope: range === "full" ? "full" : (scope || "1y")}).catch(()=>{});
+    }
+    if (!rows.length) throw new Error("No scrobbles found for “" + user + "” in that range.");
+    $("load-note").textContent = "crunching the numbers…";
+    S = compute(rows);
+    S.monthDetail = buildMonthDetail(rows);
+    renderOverview(user);
+    renderForgotten();
+    renderEvergreen();
+    $("app-footer").textContent = `${fmtN(S.total)} scrobbles · ${esc(user)} on last.fm · rendered locally in your browser`;
+    $("loading").classList.add("hidden");
+    $("app").style.display = "block";
+    history.replaceState(null, "", "#u=" + encodeURIComponent(user));
+    activate(document.body.dataset.tab || "overview");
+  } catch (e) {
+    $("loading").classList.add("hidden");
+    $("landing").classList.remove("hidden");
+    if (e.message !== "cancelled") showErr(e.message);
+  }
+}
+function buildMonthDetail(rows) {
+  const md = new Map();
+  for (const [uts, artist, , track] of rows) {
+    const k = track+"||"+artist, m = mKey(new Date(uts*1000));
+    if (!md.has(k)) md.set(k, new Map());
+    const mm = md.get(k); mm.set(m, (mm.get(m)||0) + 1);
+  }
+  return md;
+}
+
+$("btn-go").addEventListener("click", () => {
+  const user = $("inp-user").value.trim();
+  const k = $("inp-key").value.trim();
+  if (k) localStorage.setItem("lfm_key", k);
+  if (!user) return showErr("Enter a username first.");
+  load(user, $("sel-range").value);
+});
+$("inp-user").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-go").click(); });
+$("btn-cancel").addEventListener("click", () => { cancelled = true; });
+
+/* bootstrap: restore form state + auto-load from #u= */
+(function init() {
+  $("inp-user").value = localStorage.getItem("lfm_user") || "";
+  if (getKey() !== EMBEDDED_KEY) $("inp-key").value = getKey();
+  const h = new URLSearchParams(location.hash.slice(1));
+  const u = h.get("u");
+  if (h.get("tab")) document.body.dataset.tab = h.get("tab");
+  if (u) {
+    $("inp-user").value = u;
+    if (h.get("range")) $("sel-range").value = h.get("range");
+    load(u, $("sel-range").value);
+  }
+})();
+$("btn-go").addEventListener("click", () =>
+  localStorage.setItem("lfm_user", $("inp-user").value.trim()));
+</script>
+</body>
+</html>
