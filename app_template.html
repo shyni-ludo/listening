@@ -54,6 +54,7 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .cap { color:#8b98a8; font-size:13px; margin:0 0 12px; }
 .cal-year { margin-bottom:2px; }
 .grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.gridy { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px; }
 .grid3 h3 { color:#e6edf3; font-size:14px; margin:4px 0 0; text-align:center; }
 footer { color:#5d6a78; font-size:12px; text-align:center; margin:44px 0 8px; }
 
@@ -189,6 +190,10 @@ tbody tr.extra.revealed { display:table-row; }
     <section class="panel"><h2>When you press play</h2>
       <p class="cap">Scrobbles by hour of day and day of week (your local time).</p>
       <div id="fig-clock"></div></section>
+    <section class="panel"><h2>How your week shifted</h2>
+      <p class="cap">The same clock, one panel per year. Each year is scaled to its own
+        busiest hour, so the shape stays comparable even when you listened far more or less.</p>
+      <div class="gridy" id="fig-clock-years"></div></section>
     <section class="panel"><h2>The long run</h2>
       <p class="cap">Monthly scrobbles with a 3-month rolling average.</p>
       <div id="fig-vol"></div></section>
@@ -199,6 +204,10 @@ tbody tr.extra.revealed { display:table-row; }
         <div><h3>Top Tracks</h3><div id="fig-top-t"></div></div>
         <div><h3>Top Albums</h3><div id="fig-top-al"></div></div>
       </div></section>
+    <section class="panel"><h2>How concentrated is your taste?</h2>
+      <p class="cap">Cumulative share of all your scrobbles as you walk down the rankings.
+        The dotted line marks half of everything you've ever played.</p>
+      <div id="fig-conc"></div></section>
     <section class="panel"><h2>Your rotating obsessions</h2>
       <p class="cap">Quarterly top-10 leaderboard — who was on top, and when.
         Hover a line to follow one artist; big dots mark a #1 quarter.</p>
@@ -209,6 +218,11 @@ tbody tr.extra.revealed { display:table-row; }
     <section class="panel"><h2>Exploration vs. routine</h2>
       <p class="cap">New artists discovered each month (bars) and total unique artists (line).</p>
       <div id="fig-disc"></div></section>
+    <section class="panel"><h2>New blood vs. old favourites</h2>
+      <p class="cap">Share of each month's scrobbles that went to artists you were hearing
+        for the very first time — how much of your listening was actually new ground.
+        The rest came from artists you already knew.</p>
+      <div id="fig-newshare"></div></section>
   </main>
 
   <main id="tab-forgotten" class="tabpage">
@@ -410,11 +424,29 @@ function compute(rows) {
   Object.assign(s, {artists, albums, tracks, dayCounts, hourCounts, monthCounts,
                     artistCounts, pairCounts, albumCounts, firstSeen, minUts, maxUts});
 
-  // clock heatmap: 7 days x 24 hours (Mon=0)
-  const heat = Array.from({length:7}, () => new Array(24).fill(0));
-  for (const [uts] of rows) { const d = new Date(uts*1000);
-    heat[(d.getDay()+6)%7][d.getHours()]++; }
-  s.heat = heat;
+  // clock heatmap: 7 days x 24 hours (Mon=0), all-time and split by year
+  const blankHeat = () => Array.from({length:7}, () => new Array(24).fill(0));
+  const heat = blankHeat(), heatYear = new Map();
+  for (const [uts] of rows) {
+    const d = new Date(uts*1000), r = (d.getDay()+6)%7, h = d.getHours(), y = d.getFullYear();
+    heat[r][h]++;
+    if (!heatYear.has(y)) heatYear.set(y, blankHeat());
+    heatYear.get(y)[r][h]++;
+  }
+  s.heat = heat; s.heatYear = heatYear;
+
+  // share of each month's plays that came from artists first heard that month
+  const firstMonth = new Map();
+  for (const [a, uts] of firstSeen) firstMonth.set(a, mKey(new Date(uts*1000)));
+  const newShare = new Map();   // month -> [plays from brand-new artists, total plays]
+  for (const [uts, artist] of rows) {
+    const m = mKey(new Date(uts*1000));
+    const e = newShare.get(m) || [0, 0];
+    if (firstMonth.get(artist) === m) e[0]++;
+    e[1]++;
+    newShare.set(m, e);
+  }
+  s.newShare = newShare;
 
   // per-song stats (forgotten + evergreen)
   const bySong = new Map();
@@ -508,8 +540,9 @@ function renderOverview(user) {
     [`${night.toFixed(0)}%`, "Night owl score", "scrobbles between midnight and 6am"],
   ]);
 
-  renderCalendar(); renderClock(); renderVolume(); renderTopCharts();
-  renderBump(topA); renderCumulative(topA); renderDiscovery();
+  renderCalendar(); renderClock(); renderClockYears(); renderVolume(); renderTopCharts();
+  renderConcentration(); renderBump(topA); renderCumulative(topA);
+  renderDiscovery(); renderNewShare();
 }
 
 function renderCalendar() {
@@ -570,6 +603,103 @@ function renderClock() {
            ticktext:["00","02","04","06","08","10","12","14","16","18","20","22"],
            tickfont:{size:9.5, color:"#6d7a89"}, showgrid:false, zeroline:false},
     yaxis:{showgrid:false, tickfont:{size:11}, zeroline:false} });
+}
+
+/* One mini clock per year. Each is scaled to its own busiest hour so the
+   shape of a week stays comparable across years you listened more or less. */
+function renderClockYears() {
+  const days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  const short = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  const ys = [...S.heatYear.keys()].sort((a,b)=>a-b);
+  $("fig-clock-years").innerHTML = ys.map(y => `<div id="clocky-${y}"></div>`).join("");
+  for (const y of ys) {
+    const h = S.heatYear.get(y);
+    const peak = Math.max(1, ...h.flat());
+    const z = h.map(r => r.map(v => 100*v/peak));
+    const txt = h.map((r,i) => r.map((v,j) =>
+      `${days[i]}, ${String(j).padStart(2,"0")}:00 — ${fmtN(v)} scrobbles<br>` +
+      `${(100*v/peak).toFixed(0)}% of ${y}'s busiest hour`));
+    plot("clocky-"+y, [{
+      type:"heatmap", z:[...z].reverse(), text:[...txt].reverse(), hoverinfo:"text",
+      x:[...Array(24).keys()], y:[...short].reverse(),
+      colorscale:CAL_SCALE, zmin:0, zmax:100, xgap:1.5, ygap:1.5, showscale:false
+    }], { ...baseLayout(198), margin:{l:12, r:8, t:24, b:8},
+      xaxis:{tickmode:"array", tickvals:[0,6,12,18], ticktext:["00","06","12","18"],
+             tickfont:{size:9, color:"#6d7a89"}, showgrid:false, zeroline:false},
+      yaxis:{showgrid:false, zeroline:false, tickfont:{size:9, color:"#6d7a89"},
+             title:{text:String(y), font:{size:12.5, color:"#8b98a8"}}} });
+  }
+}
+
+/* Cumulative share of scrobbles against artist (and song) rank — how much of
+   your listening a handful of names actually accounts for. */
+function renderConcentration() {
+  const curve = counts => {
+    const v = [...counts.values()].sort((a,b) => b-a);
+    const tot = v.reduce((a,b) => a+b, 0);
+    let c = 0;
+    return v.map(n => 100*(c += n)/tot);
+  };
+  const series = [
+    {label:"artists", y:curve(S.artistCounts), color:"#ff8c42"},
+    {label:"songs",   y:curve(S.pairCounts),   color:"#4cc9f0"},
+  ];
+  const traces = [], anns = [];
+  for (const s of series) {
+    traces.push({type:"scatter", x:s.y.map((_, i) => i+1), y:s.y, mode:"lines",
+      line:{color:s.color, width:2.5},
+      hovertemplate:`your top %{x:,} ${s.label} = %{y:.1f}% of all scrobbles<extra></extra>`});
+    // rank at which the curve crosses half of everything you've played
+    const half = s.y.findIndex(v => v >= 50) + 1;
+    anns.push({x:Math.log10(half), y:50, ax:0, ay:-28, text:`${fmtN(half)} ${s.label}`,
+      showarrow:true, arrowhead:0, arrowwidth:1.2, arrowcolor:s.color,
+      font:{size:10.5, color:s.color}});
+    if (s.y.length >= 10)      // a brand-new account may not have 10 yet
+      anns.push({x:1, y:s.y[9], text:` top 10 ${s.label} = ${s.y[9].toFixed(1)}%`,
+        showarrow:false, xanchor:"left", yanchor:"bottom",
+        font:{size:10.5, color:s.color}});
+  }
+  plot("fig-conc", traces, { ...baseLayout(360), annotations:anns,
+    margin:{l:46, r:20, t:26, b:12},
+    shapes:[{type:"line", xref:"paper", x0:0, x1:1, yref:"y", y0:50, y1:50,
+             line:{color:"#6d7a89", width:1, dash:"dot"}}],
+    xaxis:{type:"log", title:{text:"rank (log scale)", font:{size:11.5, color:"#8b98a8"}},
+           showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}},
+    yaxis:{range:[0,101], ticksuffix:"%", showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}} });
+}
+
+/* What share of each month came from artists you'd never heard before. The
+   discovery chart counts new artists; this one weighs how much you played them. */
+function renderNewShare() {
+  // The first month is 100% new by definition — with no prior history every
+  // artist is a first meeting. Drop it so the shape and average mean something.
+  const all = [...S.newShare.keys()].sort((a,b) => a-b);
+  const ms = all.length > 1 ? all.slice(1) : all;
+  const x = ms.map(m => new Date(((m/12)|0), m%12, 1));
+  const pct = ms.map(m => 100*S.newShare.get(m)[0]/S.newShare.get(m)[1]);
+  let totNew = 0, totAll = 0;
+  for (const m of ms) { totNew += S.newShare.get(m)[0]; totAll += S.newShare.get(m)[1]; }
+  const avg = 100*totNew/totAll;
+  plot("fig-newshare", [
+    {type:"scatter", x, y:pct, mode:"lines", fill:"tozeroy",
+     line:{color:"#ff8c42", width:2}, fillcolor:"rgba(255,140,66,0.28)",
+     customdata:ms.map(m => [S.newShare.get(m)[0], S.newShare.get(m)[1],
+                             100 - 100*S.newShare.get(m)[0]/S.newShare.get(m)[1]]),
+     hovertemplate:"%{x|%b %Y}<br>%{y:.1f}% new — %{customdata[0]:,} of " +
+                   "%{customdata[1]:,} scrobbles<br>%{customdata[2]:.1f}% from artists " +
+                   "you already knew<extra></extra>"}
+  ], { ...baseLayout(340), margin:{l:46, r:20, t:26, b:12},
+    shapes:[{type:"line", xref:"paper", x0:0, x1:1, yref:"y", y0:avg, y1:avg,
+             line:{color:"#e6edf3", width:1.4, dash:"dot"}}],
+    annotations:[{xref:"paper", x:1, y:avg, xanchor:"right", yanchor:"bottom",
+                  text:`all-time average ${avg.toFixed(1)}% new`, showarrow:false,
+                  font:{size:10.5, color:"#e6edf3"}}],
+    xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"},
+           range:[x[0], x[x.length-1]], showgrid:false, zeroline:false},
+    yaxis:{rangemode:"tozero", ticksuffix:"%", showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}} });
 }
 
 function renderVolume() {
