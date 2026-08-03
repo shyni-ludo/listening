@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<!-- cartesian build, not the full one: this page only draws scatter/bar/heatmap,
+     and the full bundle is 1.33 MB gzipped against 447 KB for this. -->
+<script src="https://cdn.plot.ly/plotly-cartesian-2.35.2.min.js"></script>
 <style>
 * { box-sizing: border-box; }
 body { background:#0d1117; color:#e6edf3; margin:0; padding:0 20px 30px;
@@ -128,6 +130,41 @@ tbody tr.extra.revealed { display:table-row; }
 .progress .status { color:#8b98a8; font-size:13px; display:flex;
                     justify-content:space-between; }
 .progress .cancel { margin-top:18px; }
+
+/* ---- small screens ----
+   The page was desktop-only: no breakpoints at all, and .grid3 was pinned to
+   three columns. On a 375px phone that gave each of the three all-time charts
+   about 110px, while their artist/track labels alone need 98-136px. */
+@media (max-width: 720px) {
+  body { padding:0 12px 24px; }
+  /* nav margin must stay the mirror of the body padding */
+  nav.tabs { padding:10px 12px 0; margin:0 -12px;
+             overflow-x:auto; scrollbar-width:none; }
+  nav.tabs::-webkit-scrollbar { display:none; }
+  .brand { padding:0 4px 11px; font-size:14px; white-space:nowrap; }
+  .tab { font-size:12.5px; padding:10px 9px 11px; white-space:nowrap; }
+  h1 { font-size:30px; margin-top:24px; }
+  .tag { font-size:13.5px; }
+  .cards { gap:10px; margin:24px 0 10px; }
+  .card { padding:14px 16px; }
+  .num { font-size:22px; }
+  .panel { padding:16px 14px 8px; margin:16px 0; border-radius:12px; }
+  .panel h2 { font-size:17px; }
+  .cap { font-size:12.5px; }
+  /* minmax(0,…) not 1fr: a grid item defaults to min-width:auto, so it cannot
+     shrink below its content and a chart that rendered wide would pin it there */
+  .grid3 { grid-template-columns:minmax(0,1fr); gap:4px; }
+  .grid3 h3 { margin-top:12px; }
+  /* 11-column score tables scroll sideways instead of being crushed */
+  #f-table, #e-table { overflow-x:auto; }
+  #f-table table, #e-table table { min-width:620px; }
+  .tbl-controls { flex-wrap:wrap; }
+  .search { min-width:100%; }
+  .matches { min-width:auto; }
+  .hero h1 { font-size:34px; }
+  .hero p { font-size:14px; }
+  .form { padding:18px; }
+}
 </style>
 </head>
 <body data-tab="overview">
@@ -1178,10 +1215,13 @@ async function load(user, range, force) {
     S.monthDetail = buildMonthDetail(rows);
     // new data: the lazy tabs are stale, so let activate() build them again
     for (const t in tabRendered) tabRendered[t] = false;
+    // Reveal before rendering: a hidden container measures 0, so every chart
+    // would be laid out at Plotly's 700px fallback and then resized. The
+    // loading overlay still covers this, so nothing flashes.
+    $("app").style.display = "block";
     renderOverview(user);
     $("app-footer").textContent = `${fmtN(S.total)} scrobbles · ${esc(user)} on last.fm · rendered locally in your browser`;
     $("loading").classList.add("hidden");
-    $("app").style.display = "block";
     history.replaceState(null, "", "#u=" + encodeURIComponent(user));
     activate(document.body.dataset.tab || "overview");
   } catch (e) {
