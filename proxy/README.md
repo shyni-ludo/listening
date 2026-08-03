@@ -9,6 +9,13 @@ full loads a day.
 
 You need a Cloudflare account (free, no card) and Node installed.
 
+> **On Windows PowerShell, use `npx.cmd` rather than `npx`.** Plain `npx`
+> resolves to `npx.ps1`, which PowerShell refuses to run under its default
+> execution policy (`npx.ps1 cannot be loaded because running scripts is
+> disabled on this system`). The `.cmd` shim does the same job and is not
+> subject to that policy, so there is no need to change any system setting.
+> The commands below use `npx.cmd`; drop the `.cmd` on macOS and Linux.
+
 **1. Rotate the key first.** The current one has been public in this repo's git
 history since the first commit, so proxying the *old* key protects nothing. Get
 a fresh one at <https://www.last.fm/api/account/create>.
@@ -16,18 +23,18 @@ a fresh one at <https://www.last.fm/api/account/create>.
 **2. Log in and publish** — from inside this `proxy/` folder:
 
 ```bash
-npx wrangler login
+npx.cmd wrangler login
 ```
 
 ```bash
-npx wrangler deploy
+npx.cmd wrangler deploy
 ```
 
 **3. Give it the key.** This stores the key encrypted at Cloudflare; it is never
 written to disk in this repo:
 
 ```bash
-npx wrangler secret put LASTFM_KEY
+npx.cmd wrangler secret put LASTFM_KEY
 ```
 
 Paste the new key when prompted.
