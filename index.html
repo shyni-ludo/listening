@@ -307,6 +307,15 @@ function baseLayout(height) {
 }
 /* Charts that spread their own axis object drop baseLayout's automargin and
    clip their tick labels — re-apply it here so it can't be forgotten again. */
+/* Empty-state branches return before drawing, so wipe whatever the previous
+   user left in those slots — otherwise their charts sit under "Nothing here yet". */
+function clearFigs(...ids) {
+  for (const id of ids) {
+    const el = $(id);
+    if (el._fullLayout) Plotly.purge(el);
+    el.innerHTML = "";
+  }
+}
 function plot(id, traces, layout) {
   for (const k of ["xaxis", "yaxis", "xaxis2", "yaxis2"])
     if (layout[k]) layout[k] = {automargin: true, ...layout[k]};
@@ -889,6 +898,8 @@ function renderForgotten() {
   if (!cand.length) {
     cards("f-cards", [["—", "Nothing here yet", `no songs with ≥${FORG_MIN_PLAYS} plays`]]);
     $("f-table-cap").textContent = "Not enough listening history for forgotten songs yet.";
+    $("f-bar-cap").textContent = "";
+    clearFigs("fig-forg-bar", "fig-forg-sc", "f-table");
     return;
   }
   const dust = cand.filter(e => e.daysGone >= 365);
@@ -953,6 +964,7 @@ function renderEvergreen() {
   if (!cand.length) {
     cards("e-cards", [["—", "Nothing here yet", "no year-long song relationships yet"]]);
     $("e-table-cap").textContent = "Keep listening — evergreen songs need a year of history.";
+    clearFigs("fig-ever-bar", "fig-ever-sc", "e-table");
     return;
   }
   const long = [...cand].sort((a,b)=>b.lifespan-a.lifespan)[0];
@@ -1126,6 +1138,8 @@ async function load(user, range, force) {
     $("load-note").textContent = "crunching the numbers…";
     S = compute(rows);
     S.monthDetail = buildMonthDetail(rows);
+    // new data: the lazy tabs are stale, so let activate() build them again
+    for (const t in tabRendered) tabRendered[t] = false;
     renderOverview(user);
     $("app-footer").textContent = `${fmtN(S.total)} scrobbles · ${esc(user)} on last.fm · rendered locally in your browser`;
     $("loading").classList.add("hidden");
