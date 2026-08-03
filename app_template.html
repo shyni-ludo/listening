@@ -131,6 +131,7 @@ tbody tr.extra.revealed { display:table-row; }
 </head>
 <body data-tab="overview">
 
+
 <!-- ======================= LANDING ======================= -->
 <div class="overlay" id="landing">
   <div class="hero">
@@ -343,9 +344,9 @@ async function apiPage(user, key, page, fromTs) {
   }
   throw new Error("last.fm is having trouble right now — try again in a bit.");
 }
-function parsePage(d) {
+function parsePage(d, pg) {
   const out = [];
-  for (const t of (d.recenttracks.track || [])) {
+  for (const t of ((d.recenttracks && d.recenttracks.track) || [])) {
     if (!t.date) continue;  // now-playing
     out.push([+t.date.uts, t.artist["#text"], t.album["#text"], t.name]);
   }
@@ -355,14 +356,15 @@ async function fetchAll(user, key, fromTs, onProgress) {
   const first = await apiPage(user, key, 1, fromTs);
   const attr = first.recenttracks["@attr"];
   const totalPages = +attr.totalPages || 0;
-  let rows = parsePage(first), done = 1;
+  let rows = parsePage(first, 1), done = 1;
   onProgress(done, Math.max(totalPages,1), rows.length);
   const queue = [];
   for (let p = 2; p <= totalPages; p++) queue.push(p);
   await Promise.all(Array.from({length: CONCURRENCY}, async () => {
     while (queue.length && !cancelled) {
       const pg = queue.shift();
-      rows = rows.concat(parsePage(await apiPage(user, key, pg, fromTs)));
+      const d = await apiPage(user, key, pg, fromTs);  // never "rows = rows.concat(await …)" —
+      rows = rows.concat(parsePage(d, pg));            // that drops pages (receiver captured pre-await)
       onProgress(++done, totalPages, rows.length);
     }
   }));
@@ -758,26 +760,23 @@ function renderForgotten() {
 
   const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
   const maxS = top.score;
-  const rows = cand.map((e, i) => {
-    const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
-    const w = 4 + 96*e.score/maxS;
-    const key = esc((e.track+" "+e.artist).toLowerCase());
-    return `<tr${i>=TABLE_PREVIEW?" class='extra'":""} data-s="${key}">
-      <td class='rank ${rc}'>${i+1}</td>
-      <td class='song'>${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
-      <td class='num-c'>${fmtN(e.plays)}</td>
-      <td>${mLabel(e.peakMonth)} <span class='dim'>(${e.peakPlays}×)</span></td>
-      <td>${fmtDate(e.last)}</td><td>${fmtN(e.daysGone)}</td>
-      <td class='dim'>${fmtSpan(e.lifespan)}</td>
-      <td>${sparkline(S.qHistMap.get(e.track+"||"+e.artist) || {}, fullQ)}</td>
-      <td><div class='scorewrap'><div class='scorebar' style='width:${w.toFixed(0)}%'></div>
-      <span>${fmtN(Math.round(e.score))}</span></div></td></tr>`;
-  }).join("");
-  $("f-table").innerHTML = tableShell("forg", cand.length,
+  buildSongTable("forg", "f-table",
     `<th>#</th><th>Song</th><th>Artist</th><th>Plays</th><th>Peak month</th><th>Last heard</th>
      <th>Days gone</th><th title='First play to last play'>Lifespan</th><th>History</th>
-     <th style='width:20%' title='days silent × √(lifetime plays × best-month plays)'>Forgotten score</th>`, rows);
-  wireTable("forg");
+     <th style='width:20%' title='days silent × √(lifetime plays × best-month plays)'>Forgotten score</th>`,
+    cand, (e, i) => {
+      const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
+      const w = 4 + 96*e.score/maxS;
+      return `<tr><td class='rank ${rc}'>${i+1}</td>
+        <td class='song'>${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
+        <td class='num-c'>${fmtN(e.plays)}</td>
+        <td>${mLabel(e.peakMonth)} <span class='dim'>(${e.peakPlays}×)</span></td>
+        <td>${fmtDate(e.last)}</td><td>${fmtN(e.daysGone)}</td>
+        <td class='dim'>${fmtSpan(e.lifespan)}</td>
+        <td>${sparkline(S.qHistMap.get(e.track+"||"+e.artist) || {}, fullQ)}</td>
+        <td><div class='scorewrap'><div class='scorebar' style='width:${w.toFixed(0)}%'></div>
+        <span>${fmtN(Math.round(e.score))}</span></div></td></tr>`;
+    });
 }
 
 /* -------------------------------------------------------------- evergreen */
@@ -827,59 +826,73 @@ function renderEvergreen() {
 
   const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
   const maxS = cand[0].score;
-  const rows = cand.map((e, i) => {
-    const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
-    const w = 4 + 96*e.score/maxS;
-    const key = esc((e.track+" "+e.artist).toLowerCase());
-    const dot = e.alive ? `<span class='alive' title='played in the last ${RECENT_DAYS} days'></span>` : "";
-    return `<tr${i>=TABLE_PREVIEW?" class='extra'":""} data-s="${key}">
-      <td class='rank ${rc}'>${i+1}</td>
-      <td class='song'>${dot}${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
-      <td class='num-c'>${fmtN(e.plays)}</td>
-      <td>${fmtDate(e.first)}</td><td>${fmtDate(e.last)}</td>
-      <td class='dim'>${fmtSpan(e.lifespan)}</td>
-      <td>${e.activeMonths}<span class='dim'> / ${e.availMonths}</span></td>
-      <td>${(100*e.coverage).toFixed(0)}%</td>
-      <td>${sparkline(S.qHistMap.get(e.track+"||"+e.artist) || {}, fullQ)}</td>
-      <td><div class='scorewrap'><div class='scorebar' style='width:${w.toFixed(0)}%'></div>
-      <span>${e.score.toFixed(1)}</span></div></td></tr>`;
-  }).join("");
-  $("e-table").innerHTML = tableShell("ever", cand.length,
+  buildSongTable("ever", "e-table",
     `<th>#</th><th>Song</th><th>Artist</th><th>Plays</th><th>First heard</th><th>Last heard</th>
      <th>Lifespan</th><th title='Distinct months with a play / months since first play'>In rotation</th>
      <th title='Months with a play as % of months since first play'>Coverage</th><th>History</th>
-     <th style='width:16%' title='months in rotation × coverage'>Evergreen score</th>`, rows);
-  wireTable("ever");
+     <th style='width:16%' title='months in rotation × coverage'>Evergreen score</th>`,
+    cand, (e, i) => {
+      const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
+      const w = 4 + 96*e.score/maxS;
+      const dot = e.alive ? `<span class='alive' title='played in the last ${RECENT_DAYS} days'></span>` : "";
+      return `<tr><td class='rank ${rc}'>${i+1}</td>
+        <td class='song'>${dot}${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
+        <td class='num-c'>${fmtN(e.plays)}</td>
+        <td>${fmtDate(e.first)}</td><td>${fmtDate(e.last)}</td>
+        <td class='dim'>${fmtSpan(e.lifespan)}</td>
+        <td>${e.activeMonths}<span class='dim'> / ${e.availMonths}</span></td>
+        <td>${(100*e.coverage).toFixed(0)}%</td>
+        <td>${sparkline(S.qHistMap.get(e.track+"||"+e.artist) || {}, fullQ)}</td>
+        <td><div class='scorewrap'><div class='scorebar' style='width:${w.toFixed(0)}%'></div>
+        <span>${e.score.toFixed(1)}</span></div></td></tr>`;
+    });
 }
 
 /* --------------------------------------------------------- table machinery */
-function tableShell(prefix, n, head, rows) {
+const TBL = {};
+function tableShell(prefix, n, head) {
   return `<div class='tbl-controls'>
     <input id='q_${prefix}' class='search' type='text' placeholder='Search title or artist…' autocomplete='off'>
     <span id='match_${prefix}' class='matches'></span>
     <button class='btn' id='btn_${prefix}'></button></div>
     <table id='ftable_${prefix}' data-n='${fmtN(n)}'><thead><tr>${head}</tr></thead>
-    <tbody>${rows}</tbody></table>`;
+    <tbody id='tb_${prefix}'></tbody></table>`;
 }
-function wireTable(prefix) {
-  const input = $("q_"+prefix), btn = $("btn_"+prefix), match = $("match_"+prefix),
-        table = $("ftable_"+prefix);
-  let showAll = false;
-  function apply() {
-    const s = input.value.toLowerCase();
-    let n = 0;
-    table.querySelectorAll("tbody tr").forEach(tr => {
-      const ok = tr.dataset.s.includes(s) && (showAll || !tr.classList.contains("extra"));
-      tr.classList.toggle("revealed", ok);
-      if (ok) n++;
-    });
-    match.textContent = s ? fmtN(n) + " found" : "";
-    btn.textContent = showAll ? "Show top " + TABLE_PREVIEW
-                              : "Show all " + table.dataset.n + " songs";
+function buildSongTable(prefix, containerId, head, cand, rowFn) {
+  TBL[prefix] = {
+    keys: cand.map(e => (e.track + " " + e.artist).toLowerCase()),
+    rows: cand.map((e, i) => rowFn(e, i)),
+    showAll: false,
+  };
+  $(containerId).innerHTML = tableShell(prefix, cand.length, head);
+  $("q_" + prefix).addEventListener("input", () => {
+    TBL[prefix].showAll = false; applyTable(prefix);
+  });
+  $("btn_" + prefix).addEventListener("click", () => {
+    TBL[prefix].showAll = !TBL[prefix].showAll; applyTable(prefix);
+  });
+  applyTable(prefix);
+}
+function applyTable(prefix) {   // render rows on demand — keeps the DOM light
+  const t = TBL[prefix];
+  const s = $("q_" + prefix).value.toLowerCase();
+  let idx;
+  if (s) {
+    idx = [];
+    for (let i = 0; i < t.keys.length; i++) if (t.keys[i].includes(s)) idx.push(i);
+  } else if (t.showAll) {
+    idx = t.rows.map((_, i) => i);
+  } else {
+    idx = t.rows.slice(0, TABLE_PREVIEW).map((_, i) => i);
   }
-  input.addEventListener("input", apply);
-  btn.addEventListener("click", () => { showAll = !showAll; apply(); });
-  apply();
+  const CAP = 400;
+  $("tb_" + prefix).innerHTML = idx.slice(0, CAP).map(i => t.rows[i]).join("");
+  $("match_" + prefix).textContent = s
+    ? fmtN(idx.length) + " found" + (idx.length > CAP ? ` — showing first ${CAP}` : "")
+    : "";
+  $("btn_" + prefix).textContent = t.showAll
+    ? "Show top " + TABLE_PREVIEW
+    : "Show all " + fmtN(t.rows.length) + " songs";
 }
 
 /* ================================================================ tabs/main */
@@ -890,12 +903,18 @@ $("brand").addEventListener("click", () => {
   $("app").style.display = "none";
   $("landing").classList.remove("hidden");
 });
+const tabRendered = { forgotten: false, evergreen: false };
 function activate(name) {
   document.querySelectorAll(".tab").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tabpage").forEach(p =>
     p.classList.toggle("active", p.id === "tab-" + name));
   document.body.dataset.tab = name;
+  if (S && name in tabRendered && !tabRendered[name]) {  // lazy: render on first visit
+    tabRendered[name] = true;
+    if (name === "forgotten") renderForgotten();
+    else renderEvergreen();
+  }
   document.querySelectorAll("#tab-" + name + " .js-plotly-plot")
     .forEach(gd => Plotly.Plots.resize(gd));
   window.scrollTo({top:0});
@@ -938,8 +957,6 @@ async function load(user, range) {
     S = compute(rows);
     S.monthDetail = buildMonthDetail(rows);
     renderOverview(user);
-    renderForgotten();
-    renderEvergreen();
     $("app-footer").textContent = `${fmtN(S.total)} scrobbles · ${esc(user)} on last.fm · rendered locally in your browser`;
     $("loading").classList.add("hidden");
     $("app").style.display = "block";
