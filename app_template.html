@@ -219,9 +219,10 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap">New artists discovered each month (bars) and total unique artists (line).</p>
       <div id="fig-disc"></div></section>
     <section class="panel"><h2>New blood vs. old favourites</h2>
-      <p class="cap">Share of each month's scrobbles that went to artists you were hearing
-        for the very first time — how much of your listening was actually new ground.
-        The rest came from artists you already knew.</p>
+      <p class="cap">Each point is one month: of everything you played that month, how much
+        went to an artist you had never scrobbled before? High means you were out exploring,
+        low means you were replaying what you already loved. The bold line is a 6-month
+        trend — the monthly figure alone is too jumpy to read.</p>
       <div id="fig-newshare"></div></section>
   </main>
 
@@ -262,7 +263,19 @@ tbody tr.extra.revealed { display:table-row; }
 "use strict";
 /* =================================================================== config */
 const API = "https://ws.audioscrobbler.com/2.0/";
-const EMBEDDED_KEY = "__LASTFM_API_KEY__";
+/* The key is XOR-folded instead of sitting in the source as a plain 32-hex
+   string. That keeps it out of view-source and away from the regex scanners
+   that harvest API keys from public repos — it is NOT secret. last.fm takes
+   the key as a URL parameter, so anyone who opens the network tab still sees
+   it. Only a server-side proxy can actually hide it. */
+const KEY_PAD = "listening-report";
+const EMBEDDED_KEY = (() => {
+  const raw = atob("__LASTFM_API_KEY__");
+  let s = "";
+  for (let i = 0; i < raw.length; i++)
+    s += String.fromCharCode(raw.charCodeAt(i) ^ KEY_PAD.charCodeAt(i % KEY_PAD.length));
+  return s;
+})();
 const CACHE_VERSION = 2;   // bump to invalidate every visitor's cached scrobbles
 const PAGE_SIZE = 200;
 const CONCURRENCY = 8;
@@ -691,23 +704,36 @@ function renderNewShare() {
   let totNew = 0, totAll = 0;
   for (const m of ms) { totNew += S.newShare.get(m)[0]; totAll += S.newShare.get(m)[1]; }
   const avg = 100*totNew/totAll;
+  // month to month this bounces between 5% and 55%; the trend is the readable part
+  const WIN = 6;
+  const roll = pct.map((_, i) => {
+    const s = pct.slice(Math.max(0, i-WIN+1), i+1);
+    return s.reduce((a,b) => a+b, 0) / s.length;
+  });
   plot("fig-newshare", [
     {type:"scatter", x, y:pct, mode:"lines", fill:"tozeroy",
-     line:{color:"#ff8c42", width:2}, fillcolor:"rgba(255,140,66,0.28)",
+     line:{color:"rgba(255,140,66,0.5)", width:1.2}, fillcolor:"rgba(255,140,66,0.13)",
      customdata:ms.map(m => [S.newShare.get(m)[0], S.newShare.get(m)[1],
                              100 - 100*S.newShare.get(m)[0]/S.newShare.get(m)[1]]),
-     hovertemplate:"%{x|%b %Y}<br>%{y:.1f}% new — %{customdata[0]:,} of " +
-                   "%{customdata[1]:,} scrobbles<br>%{customdata[2]:.1f}% from artists " +
-                   "you already knew<extra></extra>"}
-  ], { ...baseLayout(340), margin:{l:46, r:20, t:26, b:12},
+     hovertemplate:"%{x|%b %Y}<br><b>%{y:.1f}% new</b> — %{customdata[0]:,} of " +
+                   "%{customdata[1]:,} scrobbles that month<br>%{customdata[2]:.1f}% went to " +
+                   "artists you already knew<extra></extra>"},
+    {type:"scatter", x, y:roll, mode:"lines", line:{color:"#ff8c42", width:3},
+     hovertemplate:`${WIN}-month trend: %{y:.1f}% new<extra></extra>`}
+  ], { ...baseLayout(340), margin:{l:60, r:20, t:26, b:12},
     shapes:[{type:"line", xref:"paper", x0:0, x1:1, yref:"y", y0:avg, y1:avg,
-             line:{color:"#e6edf3", width:1.4, dash:"dot"}}],
-    annotations:[{xref:"paper", x:1, y:avg, xanchor:"right", yanchor:"bottom",
-                  text:`all-time average ${avg.toFixed(1)}% new`, showarrow:false,
-                  font:{size:10.5, color:"#e6edf3"}}],
+             line:{color:"#8b98a8", width:1.2, dash:"dot"}}],
+    annotations:[
+      {xref:"paper", x:0, y:avg, xanchor:"left", yanchor:"bottom", xshift:4,
+       text:`all-time average ${avg.toFixed(1)}%`, showarrow:false,
+       font:{size:10.5, color:"#8b98a8"}},
+      {x:x[x.length-1], y:roll[roll.length-1], xanchor:"right", yanchor:"top", yshift:-8,
+       text:`${WIN}-month trend`, showarrow:false, font:{size:10.5, color:"#ff8c42"}},
+    ],
     xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"},
            range:[x[0], x[x.length-1]], showgrid:false, zeroline:false},
     yaxis:{rangemode:"tozero", ticksuffix:"%", showgrid:true, gridcolor:GRID, zeroline:false,
+           title:{text:"of that month's scrobbles", font:{size:11.5, color:"#8b98a8"}},
            tickfont:{size:10.5, color:"#8b98a8"}} });
 }
 
