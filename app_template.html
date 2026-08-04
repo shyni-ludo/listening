@@ -176,9 +176,9 @@ tbody tr.extra.revealed { display:table-row; }
   .grid2 { grid-template-columns:minmax(0,1fr); gap:4px; }
   /* 11-column score tables scroll sideways instead of being crushed */
   #f-table, #e-table, #a-table, #g-table, #fig-bump, #fig-aspan,
-  #fig-gtime { overflow-x:auto; }
+  #fig-gstream, #fig-gmove { overflow-x:auto; }
   #fig-bump .plot-container, #fig-aspan .plot-container,
-  #fig-gtime .plot-container { min-width:560px; }
+  #fig-gstream .plot-container, #fig-gmove .plot-container { min-width:520px; }
   #f-table table, #e-table table, #a-table table, #g-table table { min-width:620px; }
   .tbl-controls { flex-wrap:wrap; }
   .search { min-width:100%; }
@@ -307,12 +307,16 @@ tbody tr.extra.revealed { display:table-row; }
 
   <main id="tab-genres" class="tabpage">
     <header><h1>Genres</h1><p class="tag" id="g-tag">What last.fm's listeners call the music you
-      play — one label per artist, the noise stripped out.</p></header>
+      play — one genre per artist, taken from the tags they voted up.</p></header>
     <div class="cards" id="g-cards"></div>
     <section class="panel"><h2>What you actually listen to</h2>
       <p class="cap" id="g-top-cap"></p><div id="fig-genre"></div></section>
     <section class="panel"><h2>How your taste moved</h2>
-      <p class="cap" id="g-time-cap"></p><div id="fig-gtime"></div></section>
+      <p class="cap" id="g-time-cap"></p>
+      <div class="grid2">
+        <div><h3>What each quarter was made of</h3><div id="fig-gstream"></div></div>
+        <div><h3>What grew, what faded</h3><div id="fig-gmove"></div></div>
+      </div></section>
     <section class="panel"><h2>Every genre</h2>
       <p class="cap" id="g-table-cap"></p><div id="g-table"></div></section>
   </main>
@@ -1694,21 +1698,37 @@ function renderArtistTable(all) {
 
 /* =================================================================== genres */
 /* last.fm has no genre field. It has tags, which are a folksonomy: alongside
-   real genres people file artists under "seen live", "favorites", "female
-   vocalists", decades, nationalities, and the artist's own name. So a tag only
-   gets to stand for what someone listens to after surviving the filter below.
+   real genres people file artists under "seen live", "favorites", decades,
+   nationalities, cities, memes and the artist's own name.
+
+   The first attempt here blocked the noise and took whatever tag was left on
+   top. That cannot work, because the noise is unbounded — no list enumerates
+   every city and in-joke on last.fm — and it showed: Chxrlotte was filed under
+   "brighton", Cepheid under "text", We Are Fury under "electronic superhighway",
+   and a handful of artists under their own nationality. Worse, last.fm
+   normalises an artist's leading tag to 100, so ties at the top are common and
+   "first surviving tag" was picking between them arbitrarily.
+
+   So the rule is inverted: name the genres instead of the junk. A tag is only
+   considered if it appears in the vocabulary below, and the artist takes the
+   first one that does — which means a real genre four tags down beats a city at
+   the top. The vocabulary is finite and small (this account's 300 artists
+   between them use 304 distinct tags), where the blocklist never could be.
+
+   It also collapses aliases, so lofi/lo-fi and jpop/j-pop stop being separate
+   genres, and it carries a family for each, which is what the drift chart plots.
 
    Only the top GENRE_ARTISTS by plays are looked up. The tail is enormous and
    worthless here — this account has 6,140 artists, of whom 1,935 have a single
-   play, and the top 400 already carry roughly two thirds of all listening. The
-   caption always states the coverage actually achieved rather than implying
-   the whole history was classified. */
-/* Measured on this account: 300 artists classify into 103 genres, of which 60
-   come from a single artist. The top 6 are only 34% of the classified plays and
-   the top 20 barely two thirds, so showing a handful and lumping the rest is
-   what produced a chart that was mostly one grey block. Show a lot of them. */
-const GENRE_ARTISTS = 300, GENRE_MIN_TAG = 15, GENRE_CONC = 4;
-const GENRE_SHOW = 22, GENRE_GRID = 20;
+   play. The caption always states the coverage actually achieved rather than
+   implying the whole history was classified. */
+const GENRE_ARTISTS = 500, GENRE_CONC = 4;
+/* With a vocabulary the threshold barely matters — measured on this account,
+   moving it from 15 to 2 moved coverage 53.3% -> 53.7%, because a tag has to be
+   a named genre before the count is even consulted. Keep it low but non-zero:
+   a count of 1 is one person's opinion. */
+const GENRE_MIN_TAG = 2;
+const GENRE_SHOW = 22;
 /* last.fm asks for roughly five requests a second, and the key this project
    used before is already suspended at their end, so the fan-out is gated
    rather than run flat out. It costs about a minute on a completely cold
@@ -1722,40 +1742,122 @@ async function tagSlot() {
   tagGate = at + GENRE_SPACING;
   if (at > now) await sleep(at - now);
 }
-const GENRE_JUNK = new Set([
-  "seen live","favorites","favourites","favorite","favourite","favorite songs",
-  "my favorites","my favourites","loved","love","love it","awesome","amazing",
-  "beautiful","cool","epic","good","great","best","masterpiece","perfect","nice",
-  "music","musica","song","songs","album","albums","artist","artists","band","bands",
-  "female vocalists","male vocalists","female vocalist","male vocalist","female",
-  "male","vocalist","vocalists","singer","singers","duo","solo","composer",
-  "usa","american","america","british","uk","england","german","germany","japanese",
-  "japan","swedish","sweden","canadian","canada","australian","australia","french",
-  "france","russian","russia","norwegian","norway","finnish","finland","italian",
-  "italy","spanish","spain","dutch","netherlands","polish","poland","korean","korea",
-  "chinese","china","brazilian","brazil","irish","ireland","scottish","danish",
-  "spotify","itunes","youtube","soundcloud","mp3","vinyl","radio","playlist",
-  "heard on pandora","check out","to check out","want to see","wish i could see",
-]);
-/* decades, listener-count tags, and personal filing that always starts the same */
-const GENRE_JUNK_RE = /^((19|20)?\d0s)$|^under \d|^my |^i |favou?rite|^discovered|^tagged|^\d+$|^best of|^top \d|listeners$/;
+/* Each line is "Canonical Name|alias|alias…", grouped under its family. Names
+   that are descriptions rather than genres — instrumental, guitar, piano, dark,
+   chill, experimental, atmospheric, epic, beats, cover — are deliberately absent
+   so an artist tagged with one falls through to the tag that actually says what
+   they play: it is what turns Bernth from "instrumental" into Progressive Metal
+   and Yann Tiersen from "instrumental" into Soundtrack. */
+const GENRE_SPEC = {
+  "Electronic": `Electronic|eletronic|electronica|electro|indie dance|emotronic|wave
+    Dubstep|melodic dubstep|orchestral dubstep|brostep|riddim
+    Future Bass|melodic bass|midtempo bass|bubblegum bass
+    Drum & Bass|drum and bass|dnb|melodic dnb|liquid funk|drumstep|neurofunk|jungle
+    Breakcore|depressive breakcore|digicore|hexd
+    Hardcore Techno|happy hardcore|frenchcore|speedcore|j-core|gabber|chaotic hardcore
+    EDM|festival progressive house
+    Synthwave|retrowave|outrun|darksynth
+    Chiptune|8-bit|bitpop
+    IDM|glitch|glitch hop|noise
+    Artcore
+    Hardwave
+    Trance|psytrance|uplifting trance
+    Techno|minimal techno
+    Witch House`,
+  "House & Dance": `House|deep house|chicago house|progressive house|tech house|future house
+    Electro House|complextro
+    UK Garage|uk garage|2-step|garage|dark garage
+    Disco|italo disco|nu-disco
+    Funk|nu funk
+    Dance|eurobeat|eurodance`,
+  "Chill & Downtempo": `Chillstep
+    Chillout|chill|chillwave
+    Lo-Fi|lofi|lo-fi beats|lofi beats
+    Chillhop|lo-fi hip hop|lo-fi hip-hop|lo-fi hiphop|lofi hip hop|hip-hop beats
+    Downtempo|trip-hop|trip hop|abstract hip-hop
+    Future Garage`,
+  "Ambient": `Ambient|dark ambient|drone|space ambient
+    New Age`,
+  "Hip-Hop": `Hip-Hop|hip hop|hiphop|boom bap
+    Rap|melodic rap|pop rap
+    Emo Rap|emorap|emo trap|sadboy
+    Trap|traprun|trap metal|turkish trap|horrorcore
+    Cloud Rap
+    Phonk|drift phonk
+    Grime|drill|uk drill
+    Instrumental Hip-Hop
+    Rapcore`,
+  "Pop": `Pop|powerpop|epic pop
+    Indie Pop|indie-pop|twee pop
+    Dream Pop|shoegaze
+    Synthpop|electropop|synth pop
+    Hyperpop|art pop|glitchcore
+    R&B|rnb|r&b|contemporary r&b
+    Soul|neo-soul|motown`,
+  "Rock": `Rock|hard rock|glam rock|classic rock
+    Alternative|alternative rock|alt rock
+    Indie|indie rock|indie-rock
+    Post-Rock|math rock
+    Progressive Rock|psychedelic rock|art rock
+    Pop Rock
+    Grunge
+    Blues|blues rock
+    Jazz|jazz fusion|bossa nova|swing`,
+  "Metal": `Metal|heavy metal|alternative metal|math metal|nu metal
+    Progressive Metal|djent|avant-prog|technical metal
+    Symphonic Metal|female fronted metal|gothic metal|opera metal
+    Power Metal|folk metal|viking metal
+    Death Metal|melodic death metal|deathcore|blackened death metal
+    Black Metal|atmospheric black metal
+    Thrash Metal|thrash|speed metal
+    Metalcore`,
+  "Punk & Hardcore": `Hardcore|hc|melodic hardcore|hardcore punk|nazicore
+    Punk|oi|street punk|skate punk
+    Pop Punk
+    Post-Hardcore|screamo
+    Emo`,
+  "Classical & Score": `Classical|contemporary classical|modern classical|neoclassical|neo-classical|classical crossover
+    Soundtrack|ost|score|film score|epic music
+    Game Music|video game music|game soundtrack|undertale
+    Orchestral|orchestra|cinematic
+    Opera`,
+  "Folk & Acoustic": `Folk|neofolk|folk rock|celtic|indie folk
+    Acoustic
+    Singer-Songwriter|songwriter
+    Country|americana|bluegrass`,
+  "J-Music & Anime": `J-Pop|jpop|japanese pop|idol|denpa
+    J-Rock|jrock|visual kei
+    Vocaloid|vocaloidp|utaite|utaloid
+    Anime|anime music|hololive|doujin|touhou
+    K-Pop|kpop|korean pop`,
+};
+/* tag -> [canonical genre, family] */
+const GENRE_VOCAB = new Map();
+for (const family in GENRE_SPEC)
+  for (const line of GENRE_SPEC[family].split("\n")) {
+    const names = line.split("|").map(s => s.trim()).filter(Boolean);
+    for (const n of names) GENRE_VOCAB.set(n.toLowerCase(), [names[0], family]);
+  }
+const GENRE_FAMILIES = Object.keys(GENRE_SPEC);
+/* One colour per family, held apart from PALETTE so the stacked area keeps a
+   stable mapping no matter what order the families come out in. */
+const FAM_COLOR = {
+  "Electronic":"#a78bfa", "Hip-Hop":"#f472b6", "Chill & Downtempo":"#38bdf8",
+  "Rock":"#34d399", "Metal":"#fb7185", "Pop":"#fbbf24",
+  "J-Music & Anime":"#e879f9", "Classical & Score":"#fb923c",
+  "Punk & Hardcore":"#f87171", "House & Dance":"#22d3ee",
+  "Ambient":"#818cf8", "Folk & Acoustic":"#a3e635",
+};
 
-function primaryGenre(tags, artist) {
+function primaryGenre(tags) {
   if (!tags) return null;
-  const self = artist.toLowerCase().trim();
   for (const [name, count] of tags) {          // last.fm returns these top-first
     if (count < GENRE_MIN_TAG) continue;
-    const n = String(name).toLowerCase().trim();
-    if (!n || n === self || GENRE_JUNK.has(n) || GENRE_JUNK_RE.test(n)) continue;
-    return n;
+    const hit = GENRE_VOCAB.get(String(name).toLowerCase().trim());
+    if (hit) return hit;                       // [genre, family]
   }
   return null;
 }
-/* Capitalise across hyphens, so hip-hop and lo-fi read right, but leave the
-   joining words alone so it is "Drum and Bass" rather than "Drum And Bass". */
-const TITLE_SKIP = new Set(["and","of","the","a","an","in","on","to","for","vs","n"]);
-const titleCase = s => s.replace(/\b[a-z][a-z'’]*/g, (w, off) =>
-  off > 0 && TITLE_SKIP.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1));
 
 async function tagFetch(artist, key) {
   const p = new URLSearchParams({method:"artist.getTopTags", artist,
@@ -1813,7 +1915,7 @@ async function renderGenres() {
   const tags = await loadGenres(want, (d, t) =>
     note(`Looking up genres… ${fmtN(d)} / ${fmtN(t)} artists`));
   if (!tags) {
-    clearFigs("fig-genre", "fig-gtime"); $("g-table").innerHTML = "";
+    clearFigs("fig-genre", "fig-gstream", "fig-gmove"); $("g-table").innerHTML = "";
     note("Genres are unavailable right now — last.fm's tag lookup could not be reached.");
     return;
   }
@@ -1821,53 +1923,58 @@ async function renderGenres() {
   const genreOf = new Map();
   let untagged = 0;
   for (const e of all.slice(0, GENRE_ARTISTS)) {
-    const g = primaryGenre(tags.get(e.artist), e.artist);
-    if (g) genreOf.set(e.artist, g); else untagged++;
+    const hit = primaryGenre(tags.get(e.artist));
+    if (hit) genreOf.set(e.artist, hit); else untagged++;
   }
   if (!genreOf.size) {
-    clearFigs("fig-genre", "fig-gtime"); $("g-table").innerHTML = "";
+    clearFigs("fig-genre", "fig-gstream", "fig-gmove"); $("g-table").innerHTML = "";
     note("No usable genre tags came back for your artists.");
     return;
   }
 
-  /* One aggregate per genre, carrying enough for every panel on the tab. */
-  const G = new Map();
-  for (const e of all) {
-    const g = genreOf.get(e.artist);
-    if (!g) continue;
-    let x = G.get(g);
-    if (!x) { x = {genre:g, plays:0, artists:0, top:null, first:Infinity, last:0,
-                   qh:{}, yh:{}}; G.set(g, x); }
+  /* One aggregate per genre and one per family, carrying enough for every panel
+     on the tab. Both are built in the same pass because they only differ in
+     which half of the vocabulary hit they key on. */
+  const G = new Map(), F = new Map();
+  const bucket = (map, name, e) => {
+    let x = map.get(name);
+    if (!x) { x = {genre:name, plays:0, artists:0, top:null, first:Infinity, last:0,
+                   qh:{}}; map.set(name, x); }
     x.plays += e.plays; x.artists++;
     if (!x.top || e.plays > x.top.plays) x.top = e;
     x.first = Math.min(x.first, e.first);
     x.last = Math.max(x.last, e.last);
-    for (const q in S.aqHist.get(e.artist) || {}) {
-      const n = S.aqHist.get(e.artist)[q];
-      x.qh[q] = (x.qh[q] || 0) + n;
-      const y = (q/4)|0;
-      x.yh[y] = (x.yh[y] || 0) + n;
-    }
+    const ah = S.aqHist.get(e.artist) || {};
+    for (const q in ah) x.qh[q] = (x.qh[q] || 0) + ah[q];
+    return x;
+  };
+  for (const e of all) {
+    const hit = genreOf.get(e.artist);
+    if (!hit) continue;
+    bucket(G, hit[0], e).family = hit[1];
+    bucket(F, hit[1], e);
   }
   const list = [...G.values()].sort((a, b) => b.plays - a.plays);
+  const fams = [...F.values()].sort((a, b) => b.plays - a.plays);
   const classified = list.reduce((a, x) => a + x.plays, 0);
   const solo = list.filter(x => x.artists === 1).length;
 
-  $("g-tag").innerHTML = `<b>${fmtN(list.length)}</b> genres across your top `
-    + `${fmtN(genreOf.size)} artists — ${fmtN(classified)} scrobbles, `
-    + `${(100*classified/S.total).toFixed(0)}% of everything you've played.`;
+  $("g-tag").innerHTML = `<b>${fmtN(list.length)}</b> genres in `
+    + `${fmtN(fams.length)} families, across your top ${fmtN(genreOf.size)} artists — `
+    + `${fmtN(classified)} scrobbles, ${(100*classified/S.total).toFixed(0)}% of `
+    + `everything you've played.`;
   cards("g-cards", [
     [fmtN(list.length), "Genres you listen to", `${fmtN(solo)} of them from a single artist`],
-    [esc(titleCase(trunc(list[0].genre, 20))), "Your biggest genre",
+    [esc(trunc(list[0].genre, 20)), "Your biggest genre",
      `${(100*list[0].plays/classified).toFixed(0)}% of classified plays · ${fmtN(list[0].artists)} artists`],
     [fmtN(genreOf.size), "Artists classified",
-     `of your top ${fmtN(GENRE_ARTISTS)}; ${fmtN(untagged)} had no usable tag`],
+     `of your top ${fmtN(GENRE_ARTISTS)}; ${fmtN(untagged)} had no genre tag last.fm knows`],
     [`${(100*classified/S.total).toFixed(0)}%`, "Of your listening covered",
      `the unclassified tail is ${fmtN(S.byArtist.size - genreOf.size)} mostly one-play artists`],
   ]);
 
   renderGenreBars(list, classified);
-  renderGenreDrift(list, classified);
+  renderGenreDrift(fams);
   renderGenreTable(list, classified);
 }
 
@@ -1875,14 +1982,16 @@ function renderGenreBars(list, classified) {
   const top = list.slice(0, GENRE_SHOW);
   const x = top.map(g => 100*g.plays/classified);
   plot("fig-genre", [{type:"bar", orientation:"h", x,
-    y: uniqLabels(top.map(g => titleCase(trunc(g.genre, 26)))),
+    y: uniqLabels(top.map(g => trunc(g.genre, 26))),
     text: top.map((_, i) => `  ${x[i].toFixed(1)}%`),
-    hovertext: top.map((g, i) => `<b>${esc(titleCase(g.genre))}</b><br>${fmtN(g.plays)} plays `
+    hovertext: top.map((g, i) => `<b>${esc(g.genre)}</b> · ${esc(g.family)}<br>${fmtN(g.plays)} plays `
       + `(${x[i].toFixed(1)}% of everything classified)<br>${fmtN(g.artists)} `
       + `artist${g.artists === 1 ? "" : "s"} · most played: ${esc(trunc(g.top.artist, 24))}`),
     hoverinfo:"text", textposition:"outside", cliponaxis:false,
     textfont:{size:11.5, color:"#e6edf3"},
-    marker:{color: top.map((_, i) => PALETTE[i % PALETTE.length])}}],
+    // by family, not by rank, so this chart and the drift panel below share a
+    // colour key and the families read as groups here too
+    marker:{color: top.map(g => FAM_COLOR[g.family] || "#8b98a8")}}],
     { ...baseLayout(24*top.length + 60), bargap:0.3, margin:{l:12, r:12, t:14, b:24},
       xaxis:{range:[0, Math.max(...x)*1.45], showgrid:false, zeroline:false,
              showticklabels:false, fixedrange:true},
@@ -1890,78 +1999,126 @@ function renderGenreBars(list, classified) {
              tickfont:{size:11.5, color:"#c9d4e0"}} });
 
   const covered = top.reduce((a, g) => a + g.plays, 0);
-  $("g-top-cap").innerHTML = `Each artist counted once, under the tag last.fm's listeners agree on `
-    + `most, with the folksonomy noise ("seen live", "favorites", decades, nationalities) stripped `
-    + `out. These <b>${fmtN(top.length)}</b> are ${(100*covered/classified).toFixed(0)}% of your `
-    + `classified listening; the remaining ${fmtN(list.length - top.length)} genres are in the `
-    + `table below. Only your top ${fmtN(GENRE_ARTISTS)} artists are looked up — the tail is `
-    + `thousands of artists with one play each.`;
+  $("g-top-cap").innerHTML = `Each artist counted once, under the highest-voted tag on their `
+    + `last.fm page that names an actual genre — so a city, a nationality or "seen live" sitting `
+    + `at the top of the list gets passed over for the real genre below it. These `
+    + `<b>${fmtN(top.length)}</b> are ${(100*covered/classified).toFixed(0)}% of your classified `
+    + `listening; the remaining ${fmtN(list.length - top.length)} genres are in the table below. `
+    + `Bars are coloured by family, the same key the panel below uses. Only your top `
+    + `${fmtN(GENRE_ARTISTS)} artists are looked up — the tail is thousands of artists with one `
+    + `play each.`;
 }
 
-function renderGenreDrift(list, classified) {
-  /* The stacked version of this had a single grey "everything else" block
-     eating 70% of every bar, because 103 genres do not fit in six colours and
-     this account's tail is genuinely long: the top 6 are a third of the
-     listening, the top 20 barely two thirds. A grid has no such budget — every
-     genre gets a row, nothing is lumped, and no bucket is invented. */
-  const years = [...new Set(list.flatMap(g => Object.keys(g.yh).map(Number)))].sort((a, b) => a-b);
-  if (years.length < 2) {
-    clearFigs("fig-gtime");
-    $("g-time-cap").textContent = "A couple of years of history are needed before drift shows up.";
+function renderGenreDrift(fams) {
+  /* Two dead ends preceded this one. A stacked bar of six genres left a grey
+     "everything else" block eating 70% of every bar. Replacing it with a grid of
+     twenty genre rows, each shaded against its own best year, removed the lump
+     but said nothing: per-row normalisation makes brightness incomparable
+     between rows, so twenty rows of unrelated colour is noise, and sorting them
+     by overall size gave the grid no structure to read along either.
+
+     Families fix both. There are twelve, every classified play sits in exactly
+     one, so the shares are directly comparable and sum to 100 — which means a
+     plain stacked area works, with no invented bucket and nothing left over.
+     Band thickness is share, so taste moving is the bands moving, which is the
+     literal question the panel asks. */
+  const qs = [...new Set(fams.flatMap(g => Object.keys(g.qh).map(Number)))].sort((a,b) => a-b);
+  const tot = qs.map(q => fams.reduce((a, g) => a + (g.qh[q] || 0), 0));
+  /* The current quarter is usually a few weeks old and its share swings wildly
+     on a couple of hundred plays, so trailing stubs are dropped rather than
+     drawn as a spike. Measured here: every quarter clears this but the last. */
+  const med = [...tot].sort((a,b) => a-b)[tot.length >> 1] || 1;
+  let end = qs.length;
+  while (end > 2 && tot[end-1] < 0.3*med) end--;
+  const q = qs.slice(0, end), qt = tot.slice(0, end);
+  if (q.length < 4) {
+    clearFigs("fig-gstream", "fig-gmove");
+    $("g-time-cap").textContent = "A year or so of history is needed before drift shows up.";
     return;
   }
-  const yearTotal = years.map(y => list.reduce((a, g) => a + (g.yh[y] || 0), 0) || 1);
-  const rows = list.slice(0, GENRE_GRID);
-  const src = [...rows].reverse();                  // heatmap builds bottom-up
-  const share = (g, i) => 100*(g.yh[years[i]] || 0)/yearTotal[i];
 
-  const z = [], txt = [];
-  for (const g of src) {
-    const vals = years.map((_, i) => share(g, i));
-    const mx = Math.max(...vals, 0.0001);
-    // each row against its own best year: absolute share would leave everything
-    // below the top two or three genres uniformly dark
-    z.push(vals.map(v => 100*v/mx));
-    txt.push(years.map((y, i) => `<b>${esc(titleCase(g.genre))}</b> — ${y}`
-      + `<br>${vals[i].toFixed(1)}% of that year's classified plays`
-      + `<br>${fmtN(g.yh[y] || 0)} scrobbles`));
-  }
-  plot("fig-gtime", [{type:"heatmap", z, x: years.map(String), text: txt, hoverinfo:"text",
-    y: uniqLabels(src.map(g => titleCase(trunc(g.genre, 22)) + " · "
-       + (100*g.plays/classified).toFixed(1) + "%")),
-    colorscale: CAL_SCALE, zmin:0, zmax:100, showscale:false, xgap:2, ygap:1.5}],
-    { ...baseLayout(23*rows.length + 60), margin:{l:12, r:16, t:14, b:28},
-      xaxis:{showgrid:false, zeroline:false, tickfont:{size:11, color:"#8b98a8"}},
+  plot("fig-gstream", fams.map(g => ({          // first trace is the bottom band
+    type:"scatter", mode:"none", stackgroup:"one", groupnorm:"percent",
+    name: g.genre, x: q.map(qLabel), y: q.map(k => g.qh[k] || 0),
+    fillcolor: FAM_COLOR[g.genre] || "#8b98a8", hoverinfo:"text",
+    text: q.map((k, i) => `<b>${esc(g.genre)}</b> — ${qLabel(k)}`
+      + `<br>${(100*(g.qh[k]||0)/(qt[i]||1)).toFixed(1)}% of that quarter`
+      + `<br>${fmtN(g.qh[k] || 0)} scrobbles`) })),
+    { ...baseLayout(360), margin:{l:12, r:12, t:10, b:30}, hovermode:"closest",
+      xaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#8b98a8"},
+             tickmode:"array", tickvals: q.filter(k => k%4 === 0).map(qLabel),
+             ticktext: q.filter(k => k%4 === 0).map(k => String((k/4)|0))},
+      yaxis:{showgrid:false, zeroline:false, range:[0,100], ticksuffix:"%",
+             tickfont:{size:10, color:"#8b98a8"}},
+      /* Name the widest bands on the chart itself. The rest are named by the
+         panel beside this one, which is colour-matched and lists all twelve. */
+      annotations: (() => {
+        const m = q.length >> 1, out = []; let base = 0;
+        for (const g of fams) {
+          const s = 100*(g.qh[q[m]] || 0)/(qt[m] || 1);
+          if (s >= 6) out.push({x: qLabel(q[m]), y: base + s/2, text: g.genre,
+            showarrow:false, font:{size:10.5, color:"#11151c"}, xanchor:"center"});
+          base += s;
+        }
+        return out;
+      })() });
+
+  /* Endpoint years are the thinnest — 2021 holds 2,409 classified plays here
+     against 2022's 27,224 — so first-year-to-last-year deltas are mostly noise
+     amplification. Splitting the account in half by play count instead weights
+     every scrobble the same, and it is a claim anyone can check: this much of
+     the first half, this much of the second. */
+  const grand = qt.reduce((a,b) => a+b, 0);
+  let cum = 0, cut = 0;
+  while (cut < q.length - 1 && cum + qt[cut] < grand/2) cum += qt[cut++];
+  const early = q.slice(0, cut), late = q.slice(cut);
+  const eN = qt.slice(0, cut).reduce((a,b) => a+b, 0), lN = grand - eN;
+  const sum = (g, ks) => ks.reduce((a, k) => a + (g.qh[k] || 0), 0);
+  const moves = fams.map(g => ({ name: g.genre,
+      e: 100*sum(g, early)/(eN||1), l: 100*sum(g, late)/(lN||1) }))
+    .map(m => ({...m, d: m.l - m.e}))
+    .sort((a, b) => a.d - b.d);           // bar charts build bottom-up
+
+  plot("fig-gmove", [{type:"bar", orientation:"h", x: moves.map(m => m.d),
+    y: uniqLabels(moves.map(m => m.name)),
+    marker:{color: moves.map(m => FAM_COLOR[m.name] || "#8b98a8")},
+    text: moves.map(m => (m.d >= 0 ? " +" : " ") + m.d.toFixed(1)),
+    textposition:"outside", cliponaxis:false, textfont:{size:10.5, color:"#c9d4e0"},
+    hovertext: moves.map(m => `<b>${esc(m.name)}</b><br>${m.e.toFixed(1)}% of the first half`
+      + `<br>${m.l.toFixed(1)}% of the second<br>${m.d >= 0 ? "gained" : "lost"} `
+      + `${Math.abs(m.d).toFixed(1)} points`), hoverinfo:"text"}],
+    { ...baseLayout(360), bargap:0.32, margin:{l:12, r:12, t:10, b:30},
+      xaxis:{showgrid:false, zeroline:true, zerolinecolor:"#3a4552", zerolinewidth:1,
+             title:{text:"percentage points", font:{size:10, color:"#8b98a8"}},
+             tickfont:{size:10, color:"#8b98a8"},
+             range:[Math.min(...moves.map(m => m.d))*1.6 - 0.6,
+                    Math.max(...moves.map(m => m.d))*1.6 + 0.6]},
       yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
 
-  // the sharpest arrival and the sharpest departure across the whole span
-  const f = 0, l = years.length - 1;
-  let up = null, down = null;
-  for (const g of rows) {
-    const d = share(g, l) - share(g, f);
-    if (!up || d > up[1]) up = [g.genre, d];
-    if (!down || d < down[1]) down = [g.genre, d];
-  }
-  $("g-time-cap").innerHTML = `Your top ${fmtN(rows.length)} genres, one row each, by year — the `
-    + `percentage beside the name is its share of all your classified listening, and each row is `
-    + `shaded against its own strongest year, so a row reads as that genre's own rise and fall. `
-    + `Between ${years[f]} and ${years[l]}, <b>${esc(titleCase(up[0]))}</b> gained `
-    + `${Math.abs(up[1]).toFixed(1)} points of your listening and `
-    + `<b>${esc(titleCase(down[0]))}</b> lost ${Math.abs(down[1]).toFixed(1)}.`;
+  const up = moves[moves.length-1], down = moves[0];
+  const at = q[cut];
+  $("g-time-cap").innerHTML = `Twelve families, and every classified play sits in exactly one — `
+    + `nothing is bucketed as "other" because nothing is left over. On the left, the thickness of `
+    + `a band is that family's share of the quarter. On the right, its share of your first `
+    + `${fmtN(eN)} classified plays against your most recent ${fmtN(lN)}, split at `
+    + `<b>${qLabel(at)}</b>. <b>${esc(up.name)}</b> gained ${up.d.toFixed(1)} points and `
+    + `<b>${esc(down.name)}</b> lost ${Math.abs(down.d).toFixed(1)}.`;
 }
 
 function renderGenreTable(list, classified) {
   const fullQ = [...new Set([...S.monthCounts.keys()]
     .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a, b) => a-b);
   $("g-table-cap").innerHTML = `All ${fmtN(list.length)} genres, biggest first — including the `
-    + `${fmtN(list.filter(g => g.artists === 1).length)} that come from a single artist.`;
+    + `${fmtN(list.filter(g => g.artists === 1).length)} that come from a single artist. `
+    + `Searching a family name pulls up everything filed under it.`;
   buildSongTable("gen", "g-table",
-    `<th>#</th><th>Genre</th><th>Plays</th><th>Share</th><th>Artists</th>
+    `<th>#</th><th>Genre</th><th>Family</th><th>Plays</th><th>Share</th><th>Artists</th>
      <th>Most played</th><th>First heard</th><th>Last heard</th><th>History</th>`,
     list, (g, i) => {
       const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
       return `<tr><td class='rank ${rc}'>${i+1}</td>
-        <td class='song'>${esc(titleCase(trunc(g.genre, 30)))}</td>
+        <td class='song'>${esc(trunc(g.genre, 30))}</td>
+        <td class='artist' style='color:${FAM_COLOR[g.family] || "#8b98a8"}'>${esc(g.family)}</td>
         <td class='num-c'>${fmtN(g.plays)}</td>
         <td class='num-c'>${(100*g.plays/classified).toFixed(1)}%</td>
         <td class='num-c'>${fmtN(g.artists)}</td>
@@ -1969,8 +2126,8 @@ function renderGenreTable(list, classified) {
         <td>${fmtDate(g.first)}</td><td>${fmtDate(g.last)}</td>
         <td>${sparkline(g.qh, fullQ)}</td></tr>`;
     },
-    {keyFn: g => g.genre.toLowerCase() + " " + g.top.artist.toLowerCase(),
-     noun: "genres", placeholder: "Search genre or artist…"});
+    {keyFn: g => (g.genre + " " + g.family + " " + g.top.artist).toLowerCase(),
+     noun: "genres", placeholder: "Search genre, family or artist…"});
 }
 
 /* --------------------------------------------------------- table machinery */
@@ -2072,7 +2229,7 @@ function activate(name, opts = {}) {
       // network-bound and cached across visits; a failure must not blank the tab
       renderGenres().catch(err => {
         console.warn("genre lookup failed", err);
-        clearFigs("fig-genre", "fig-gtime");
+        clearFigs("fig-genre", "fig-gstream", "fig-gmove");
         $("g-top-cap").textContent = "Genres are unavailable right now.";
       });
     }
