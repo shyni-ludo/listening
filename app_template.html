@@ -614,7 +614,8 @@ function clearFigs(...ids) {
 function plot(id, traces, layout) {
   for (const k of ["xaxis", "yaxis", "xaxis2", "yaxis2"])
     if (layout[k]) layout[k] = {automargin: true, ...layout[k]};
-  Plotly.newPlot($(id), traces, layout, CFG);
+  // returned so a caller can attach to the rendered SVG once it exists
+  return Plotly.newPlot($(id), traces, layout, CFG);
 }
 
 /* date labels (mKey/qKey/dKey are in #compute-src, shared with the worker) */
@@ -2102,6 +2103,45 @@ function renderGenreBars(list, classified) {
     + `play each.`;
 }
 
+/* A dozen bands is well past the point where colour alone tells you which is
+   which. Hovering a band or its legend entry drops the others back towards the
+   panel so one stays lit, and a click pins that state — which is the only way to
+   get at it on a phone, where nothing hovers.
+
+   This drops opacity on the rendered trace groups rather than going through
+   Plotly.restyle. Restyle re-renders, and a re-render rebuilds the legend DOM
+   out from under the very listeners doing the highlighting. */
+function focusBands(id) {
+  const gd = $(id);
+  const bands = [...gd.querySelectorAll(".scatterlayer > g.trace")];
+  const keys = [...gd.querySelectorAll(".legend .traces")];
+  if (!bands.length || keys.length !== bands.length) return;   // Plotly moved, do nothing
+  let cur = -1, pinned = null;
+  const show = i => {
+    if (i === cur) return;
+    cur = i;
+    bands.forEach((b, k) => b.style.opacity = (i === null || k === i) ? "" : "0.12");
+    keys.forEach((b, k) => b.style.opacity = (i === null || k === i) ? "" : "0.3");
+  };
+  const hover = i => { if (pinned === null) show(i); };
+  gd.on("plotly_hover", e => hover(e.points[0].curveNumber));
+  gd.on("plotly_unhover", () => hover(null));
+  keys.forEach((node, i) => {
+    node.style.cursor = "pointer";
+    node.addEventListener("mouseenter", () => hover(i));
+    node.addEventListener("mouseleave", () => hover(null));
+    node.addEventListener("click", () => {
+      pinned = pinned === i ? null : i;
+      show(pinned);
+    });
+  });
+  // a click anywhere on the plot itself releases the pin
+  gd.addEventListener("click", e => {
+    if (e.target.closest(".legend")) return;
+    if (pinned !== null) { pinned = null; show(null); }
+  });
+}
+
 function renderGenreDrift(fams) {
   /* Two dead ends preceded this one. A stacked bar of six genres left a grey
      "everything else" block eating 70% of every bar. Replacing it with a grid of
@@ -2147,8 +2187,43 @@ function renderGenreDrift(fams) {
      single opening quarter sorts that column without inversions; widening the
      window to a year puts three back. Ties fall back to lifetime plays, for
      accounts whose first quarter is too sparse to separate everything. */
+  /* Fold away the families that never amount to anything, so the colour count
+     comes down. Two rules, and the second is the important one: a family is only
+     a candidate while the running total of what has been folded stays under
+     MERGE_BUDGET of all classified listening, and it is spared outright if it
+     ever held MERGE_GUARD of a single quarter. Without the guard this would
+     quietly delete exactly the interesting case — something that was nothing for
+     years and then took over. A bucket of one is just a rename, so it takes two
+     to bother. Measured on this account it folds nothing at all: the smallest
+     family is 2.3% of everything but reached 11.9% of a quarter, and every other
+     one peaks higher still. */
+  const MERGE_BUDGET = 10, MERGE_GUARD = 8;
+  const grandTotal = fams.reduce((a, g) => a + g.plays, 0) || 1;
+  const peakOf = g => Math.max(...q.map((k, i) => 100*(g.qh[k] || 0)/(qt[i] || 1)));
+  const tail = [];
+  let spent = 0;
+  for (const g of [...fams].sort((a, b) => a.plays - b.plays)) {
+    const s = 100*g.plays/grandTotal;
+    if (spent + s > MERGE_BUDGET) break;      // sorted ascending, so nothing later fits either
+    if (peakOf(g) >= MERGE_GUARD) continue;   // it mattered once — leave it visible
+    spent += s; tail.push(g);
+  }
+  let shown = fams;
+  if (tail.length >= 2) {
+    /* Named after what is actually in it. "Other" is what made the very first
+       version of this panel useless, and a bucket nobody can see inside is the
+       same mistake at a smaller scale. */
+    const names = tail.map(g => g.genre);
+    const qh = {};
+    for (const g of tail) for (const k in g.qh) qh[k] = (qh[k] || 0) + g.qh[k];
+    shown = fams.filter(g => !tail.includes(g)).concat([{
+      genre: names.length <= 2 ? names.join(" & ")
+           : `${names[0]}, ${names[1]} & ${names.length - 2} more`,
+      plays: tail.reduce((a, g) => a + g.plays, 0), artists: 0, qh, members: names }]);
+  }
+
   const opener = g => (g.qh[q[0]] || 0);
-  const band = [...fams].sort((a, b) => (opener(b) - opener(a)) || (b.plays - a.plays));
+  const band = [...shown].sort((a, b) => (opener(b) - opener(a)) || (b.plays - a.plays));
   /* A twelve-entry horizontal legend packs into three rows across a full-width
      panel and into twelve on a phone, where every entry claims its own line.
      Measured: 67px of legend at 1112px wide against 238px at 303px. Buy the
@@ -2161,7 +2236,8 @@ function renderGenreDrift(fams) {
     fillcolor: FAM_COLOR[g.genre] || "#8b98a8", hoverinfo:"text",
     text: q.map((k, i) => `<b>${esc(g.genre)}</b> — ${qLabel(k)}`
       + `<br>${(100*(g.qh[k]||0)/(qt[i]||1)).toFixed(1)}% of that quarter`
-      + `<br>${fmtN(g.qh[k] || 0)} scrobbles`) })),
+      + `<br>${fmtN(g.qh[k] || 0)} scrobbles`
+      + (g.members ? `<br><i>${esc(g.members.join(", "))}</i>` : "")) })),
     { ...baseLayout(wide ? 500 : 690), margin:{l:12, r:12, t:10, b:26}, hovermode:"closest",
       xaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#8b98a8"},
              tickmode:"array", tickvals: q.filter(k => k%4 === 0).map(qLabel),
@@ -2169,12 +2245,14 @@ function renderGenreDrift(fams) {
       yaxis:{showgrid:false, zeroline:false, range:[0,100], ticksuffix:"%",
              tickfont:{size:10, color:"#8b98a8"}},
       showlegend:true,
-      /* Clicking a legend entry would hide that band, and because the stack is
+      /* Plotly's own legend click hides that band, and because the stack is
          percent-normalised the remaining eleven would silently rescale to fill
-         the gap. That reads as data changing, so the entries are inert. */
+         the gap — that reads as the data changing. Its default is off, and
+         focusBands puts a click of its own on top. */
       legend:{orientation:"h", x:0, xanchor:"left", y:-0.08, yanchor:"top",
               traceorder:"normal", font:{size:10.5, color:"#c9d4e0"},
-              itemclick:false, itemdoubleclick:false, bgcolor:"rgba(0,0,0,0)"} });
+              itemclick:false, itemdoubleclick:false, bgcolor:"rgba(0,0,0,0)"} })
+    .then(() => focusBands("fig-gstream"));
 
   /* Endpoint years are the thinnest — 2021 holds 2,409 classified plays here
      against 2022's 27,224 — so first-year-to-last-year deltas are mostly noise
@@ -2187,7 +2265,7 @@ function renderGenreDrift(fams) {
   const early = q.slice(0, cut), late = q.slice(cut);
   const eN = qt.slice(0, cut).reduce((a,b) => a+b, 0), lN = grand - eN;
   const sum = (g, ks) => ks.reduce((a, k) => a + (g.qh[k] || 0), 0);
-  const moves = fams.map(g => ({ name: g.genre,
+  const moves = shown.map(g => ({ name: g.genre,
       e: 100*sum(g, early)/(eN||1), l: 100*sum(g, late)/(lN||1) }))
     .map(m => ({...m, d: m.l - m.e}))
     .sort((a, b) => a.d - b.d);           // bar charts build bottom-up
@@ -2214,7 +2292,14 @@ function renderGenreDrift(fams) {
     + `nothing is bucketed as "other" because nothing is left over. Above, the thickness of a band `
     + `is that family's share of the quarter, stacked in the order they started — whichever family `
     + `was the biggest slice of <b>${qLabel(q[0])}</b> sits at the bottom, so the chart opens as a `
-    + `clean ranking and everything after it is movement. Below, each family's share of your first `
+    + `clean ranking and everything after it is movement. Hover a band or a name to light it and `
+    + `drop the rest; click a name to keep it that way. `
+    + (shown.length < fams.length
+       ? `The ${fmtN(tail.length)} smallest families are folded into one band — `
+         + `together ${spent.toFixed(1)}% of your listening, and none of them ever held `
+         + `${MERGE_GUARD}% of a quarter. `
+       : "")
+    + `Below, each family's share of your first `
     + `${fmtN(eN)} classified plays against your most recent ${fmtN(lN)}, split at `
     + `<b>${qLabel(at)}</b>. <b>${esc(up.name)}</b> gained ${up.d.toFixed(1)} points and `
     + `<b>${esc(down.name)}</b> lost ${Math.abs(down.d).toFixed(1)}.`;
