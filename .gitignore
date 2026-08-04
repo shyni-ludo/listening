@@ -6,8 +6,10 @@ scrobbles.csv
 dashboard.html
 index.html.bak
 
-# wrangler's local account cache — machine-specific, not part of the deploy
+# wrangler's local account cache — machine-specific, not part of the deploy.
+# Deploying with --config from the repo root drops it here instead of in proxy/.
 proxy/.wrangler/
+.wrangler/
 
 # unrelated / personal
 audio-1785586731544.mp3

@@ -31,6 +31,7 @@ body { background:#0d1117; color:#e6edf3; margin:0; padding:0 20px 30px;
        font-family:'Inter','Segoe UI',system-ui,sans-serif; min-height:100vh; }
 body[data-tab='overview']  { --a:#ff8c42; --b:#ff5964; --c:#ffd07b; }
 body[data-tab='artists']   { --a:#a78bfa; --b:#7c5cd6; --c:#f0abfc; }
+body[data-tab='genres']    { --a:#ff6ec7; --b:#c2258f; --c:#ffd6f5; }
 body[data-tab='forgotten'] { --a:#ff8c42; --b:#e0523c; --c:#ffd07b; }
 body[data-tab='evergreen'] { --a:#06d6a0; --b:#4cc9f0; --c:#b388eb; }
 .wrap { max-width:1180px; margin:0 auto; }
@@ -174,9 +175,11 @@ tbody tr.extra.revealed { display:table-row; }
   .grid3 h3 { margin-top:12px; }
   .grid2 { grid-template-columns:minmax(0,1fr); gap:4px; }
   /* 11-column score tables scroll sideways instead of being crushed */
-  #f-table, #e-table, #a-table, #fig-bump, #fig-aspan { overflow-x:auto; }
-  #fig-bump .plot-container, #fig-aspan .plot-container { min-width:560px; }
-  #f-table table, #e-table table, #a-table table { min-width:620px; }
+  #f-table, #e-table, #a-table, #g-table, #fig-bump, #fig-aspan,
+  #fig-gtime { overflow-x:auto; }
+  #fig-bump .plot-container, #fig-aspan .plot-container,
+  #fig-gtime .plot-container { min-width:560px; }
+  #f-table table, #e-table table, #a-table table, #g-table table { min-width:620px; }
   .tbl-controls { flex-wrap:wrap; }
   .search { min-width:100%; }
   .matches { min-width:auto; }
@@ -234,6 +237,7 @@ tbody tr.extra.revealed { display:table-row; }
     <div class="brand" id="brand" title="start over">♪ my <em>listening</em></div>
     <button class="tab active" data-tab="overview">Overview</button>
     <button class="tab" data-tab="artists">Artists</button>
+    <button class="tab" data-tab="genres">Genres</button>
     <button class="tab" data-tab="forgotten">Forgotten songs</button>
     <button class="tab" data-tab="evergreen">Evergreen songs</button>
   </nav>
@@ -295,14 +299,22 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap" id="a-shape-cap"></p>
       <div class="grid2"><div><h3>Flashes</h3><div id="fig-flash"></div></div>
         <div><h3>Lifers</h3><div id="fig-lifer"></div></div></div></section>
-    <section class="panel"><h2>What you actually listen to</h2>
-      <p class="cap" id="a-genre-cap"></p><div id="fig-genre"></div></section>
-    <section class="panel"><h2>How your taste moved</h2>
-      <p class="cap" id="a-gtime-cap"></p><div id="fig-gtime"></div></section>
     <section class="panel"><h2>How deep you went</h2>
       <p class="cap" id="a-depth-cap"></p><div id="fig-adepth"></div></section>
     <section class="panel"><h2>Every artist</h2>
       <p class="cap" id="a-table-cap"></p><div id="a-table"></div></section>
+  </main>
+
+  <main id="tab-genres" class="tabpage">
+    <header><h1>Genres</h1><p class="tag" id="g-tag">What last.fm's listeners call the music you
+      play — one label per artist, the noise stripped out.</p></header>
+    <div class="cards" id="g-cards"></div>
+    <section class="panel"><h2>What you actually listen to</h2>
+      <p class="cap" id="g-top-cap"></p><div id="fig-genre"></div></section>
+    <section class="panel"><h2>How your taste moved</h2>
+      <p class="cap" id="g-time-cap"></p><div id="fig-gtime"></div></section>
+    <section class="panel"><h2>Every genre</h2>
+      <p class="cap" id="g-table-cap"></p><div id="g-table"></div></section>
   </main>
 
   <main id="tab-forgotten" class="tabpage">
@@ -444,30 +456,30 @@ function compute(rows) {
      forgotten/evergreen rankings, and honouring it here would put this map
      quietly at odds with artistCounts and the all-time charts. */
   const byArtist = new Map();
-  const aMonths = new Map(), aTracks = new Map(), aPeak = new Map(), aqHist = new Map();
+  const aTracks = new Map(), amHist = new Map(), aqHist = new Map();
   for (const [uts, artist, album, track] of rows) {
     const d = new Date(uts*1000), mk = mKey(d), qk = qKey(d);
     let e = byArtist.get(artist);
     if (!e) {
       e = {artist, plays:0, first:uts, last:uts};
       byArtist.set(artist, e);
-      aMonths.set(artist, new Set()); aTracks.set(artist, new Set());
+      aTracks.set(artist, new Set()); amHist.set(artist, {});
     }
     e.plays++; if (uts < e.first) e.first = uts; if (uts > e.last) e.last = uts;
-    aMonths.get(artist).add(mk);
     aTracks.get(artist).add(track);
-    const pmk = artist+"|"+mk;
-    aPeak.set(pmk, (aPeak.get(pmk)||0) + 1);
+    const mh = amHist.get(artist); mh[mk] = (mh[mk]||0) + 1;
     const qh = aqHist.get(artist) || {}; qh[qk] = (qh[qk]||0) + 1; aqHist.set(artist, qh);
   }
   for (const [a, e] of byArtist) {
-    let peakM = 0, peakN = 0;
-    for (const mk of aMonths.get(a)) {
-      const n = aPeak.get(a+"|"+mk) || 0;
-      if (n > peakN) { peakN = n; peakM = mk; }
+    // the monthly histogram is the peak, the month count and the timeline strip
+    let peakM = 0, peakN = 0, months = 0;
+    for (const mk in amHist.get(a)) {
+      const n = amHist.get(a)[mk];
+      months++;
+      if (n > peakN) { peakN = n; peakM = +mk; }
     }
     e.peakMonth = peakM; e.peakPlays = peakN;
-    e.activeMonths = aMonths.get(a).size;
+    e.activeMonths = months;
     e.trackCount = aTracks.get(a).size;
     e.availMonths = refM - mKey(new Date(e.first*1000)) + 1;
     e.coverage = e.activeMonths / e.availMonths;
@@ -477,7 +489,7 @@ function compute(rows) {
     e.burst = e.peakPlays / e.plays;      // share of everything they got, in one month
     e.everScore = e.activeMonths * e.coverage;   // same shape as the song version
   }
-  s.byArtist = byArtist; s.aqHist = aqHist;
+  s.byArtist = byArtist; s.aqHist = aqHist; s.amHist = amHist;
   return s;
 }
 
@@ -1509,13 +1521,6 @@ function renderArtists() {
   renderArtistShape(deep, refM);
   renderArtistDepth(all);
   renderArtistTable(all);
-  // network-bound and cached across visits — never let it hold up the rest
-  renderGenres(all).catch(err => {
-    console.warn("genre lookup failed", err);
-    clearFigs("fig-genre", "fig-gtime");
-    $("a-genre-cap").textContent = "Genres are unavailable right now.";
-    $("a-gtime-cap").textContent = "";
-  });
 }
 
 function renderArtistSpans(top) {
@@ -1528,38 +1533,44 @@ function renderArtistSpans(top) {
      over years, so this puts the diamonds on a diagonal and the list reads as
      the order in which each artist had its moment. */
   const rows = [...top].sort((a, b) => a.peakMonth - b.peakMonth);
-  const ylab = uniqLabels(rows.map(e => trunc(e.artist, 24)));
-  const DAY = 86400000;
-  plot("fig-aspan", [
-    {type:"bar", orientation:"h", y:ylab, width:0.55,
-     base: rows.map(e => e.first*1000),
-     // a same-day first and last would otherwise draw nothing at all
-     x: rows.map(e => Math.max((e.last - e.first)*1000, 5*DAY)),
-     marker:{color: rows.map(e => e.alive ? "#a78bfa" : "#3d4658")},
-     hovertext: rows.map(e => `<b>${esc(e.artist)}</b><br>${fmtDate(e.first)} → ${fmtDate(e.last)}`
-       + `<br>${fmtN(e.plays)} plays of ${fmtN(e.trackCount)} track${e.trackCount === 1 ? "" : "s"}`
-       + `, across ${fmtN(e.activeMonths)} month${e.activeMonths === 1 ? "" : "s"}`
-       + (e.alive ? "<br>still in rotation" : `<br>quiet for ${fmtSpan(e.daysGone)}`)),
-     hoverinfo:"text"},
-    {type:"scatter", mode:"markers", y:ylab,
-     x: rows.map(e => +new Date((e.peakMonth/12)|0, e.peakMonth%12, 15)),
-     marker:{size:9, symbol:"diamond", color:"#ffd07b", line:{color:"#161b22", width:1.5}},
-     hovertext: rows.map(e => `${esc(e.artist)} peaked in ${mLabel(e.peakMonth)}`
-       + `<br>${fmtN(e.peakPlays)} plays that month — ${(100*e.burst).toFixed(0)}% of everything you gave them`),
-     hoverinfo:"text"},
-  ], { ...baseLayout(26*rows.length + 96), bargap:0.3,
-    margin:{l:12, r:20, t:16, b:30},
-    xaxis:{type:"date", showgrid:true, gridcolor:GRID, zeroline:false,
-           tickfont:{size:10.5, color:"#8b98a8"}},
-    yaxis:{type:"category", autorange:"reversed", showgrid:false, zeroline:false,
-           tickfont:{size:11, color:"#c9d4e0"}} });
+  /* A solid bar per artist said only "present" — and since these are the most
+     played artists, nearly every bar spanned nearly the whole axis in the same
+     colour. Month by month intensity says when they actually mattered, and the
+     empty months at each end give the same first/last extent for free. */
+  const m0 = mKey(new Date(S.minUts*1000)), m1 = mKey(new Date(S.maxUts*1000));
+  const months = [];
+  for (let m = m0; m <= m1; m++) months.push(m);
+  const src = [...rows].reverse();          // a heatmap draws its first row at the bottom
+  const ylab = uniqLabels(src.map(e => trunc(e.artist, 24)));
+  const z = [], txt = [];
+  for (const e of src) {
+    const mh = S.amHist.get(e.artist) || {};
+    const vals = months.map(m => mh[m] || 0);
+    // scaled against the artist's own best month: absolute would leave everyone
+    // outside the top three a uniform near-black, which is the old problem back
+    const mx = Math.max(...vals, 1);
+    z.push(vals.map(v => 100*v/mx));
+    txt.push(months.map((m, i) => `<b>${esc(e.artist)}</b> — ${mLabel(m)}`
+      + `<br>${fmtN(vals[i])} play${vals[i] === 1 ? "" : "s"}`
+      + (m === e.peakMonth ? ` — their biggest month, ${(100*e.burst).toFixed(0)}% of everything `
+                             + `you gave them` : "")));
+  }
+  plot("fig-aspan", [{type:"heatmap", z, y:ylab, x:months.map(mLabel), text:txt,
+    hoverinfo:"text", colorscale:CAL_SCALE, zmin:0, zmax:100, showscale:false,
+    xgap:1, ygap:1.5}],
+    { ...baseLayout(24*rows.length + 92), margin:{l:12, r:16, t:16, b:34},
+      xaxis:{showgrid:false, zeroline:false, tickangle:0,
+             tickfont:{size:9.5, color:"#8b98a8"}, tickmode:"array",
+             tickvals: months.filter(m => m % 12 === 0).map(mLabel)},
+      yaxis:{showgrid:false, zeroline:false, tickfont:{size:11, color:"#c9d4e0"}} });
 
   const alive = rows.filter(e => e.alive).length;
-  $("a-span-cap").innerHTML = `Your ${fmtN(rows.length)} most-played artists, top to bottom in the `
-    + `order they peaked — so the <b style="color:#ffd07b">◆</b> diagonal is your taste moving. `
-    + `Each bar runs from first play to last, which makes the stretch after the diamond the fade `
-    + `and a short bar an artist who burned out fast. <b style="color:#a78bfa">Purple</b> means `
-    + `still in rotation (${fmtN(alive)} of ${fmtN(rows.length)}); grey means gone quiet.`;
+  $("a-span-cap").innerHTML = `Your ${fmtN(rows.length)} most-played artists, one row each, month `
+    + `by month — top to bottom in the order they peaked, so the bright diagonal is your taste `
+    + `moving. Every row is scaled against its own biggest month, so this is the shape of each `
+    + `relationship rather than its size: a single hot block is an artist who burned out, a long `
+    + `warm streak is one who stayed. Rows still lit at the right-hand edge are the `
+    + `${fmtN(alive)} of ${fmtN(rows.length)} still in rotation.`;
 }
 
 function renderArtistShape(deep, refM) {
@@ -1692,7 +1703,12 @@ function renderArtistTable(all) {
    play, and the top 400 already carry roughly two thirds of all listening. The
    caption always states the coverage actually achieved rather than implying
    the whole history was classified. */
-const GENRE_ARTISTS = 300, GENRE_MIN_TAG = 15, GENRE_CONC = 4, GENRE_SHOW = 12;
+/* Measured on this account: 300 artists classify into 103 genres, of which 60
+   come from a single artist. The top 6 are only 34% of the classified plays and
+   the top 20 barely two thirds, so showing a handful and lumping the rest is
+   what produced a chart that was mostly one grey block. Show a lot of them. */
+const GENRE_ARTISTS = 300, GENRE_MIN_TAG = 15, GENRE_CONC = 4;
+const GENRE_SHOW = 22, GENRE_GRID = 20;
 /* last.fm asks for roughly five requests a second, and the key this project
    used before is already suspended at their end, so the fan-out is gated
    rather than run flat out. It costs about a minute on a completely cold
@@ -1788,123 +1804,173 @@ async function loadGenres(want, onProgress) {
   return got.size ? got : null;
 }
 
-async function renderGenres(all) {
+async function renderGenres() {
+  const all = [...S.byArtist.values()].sort((a, b) => b.plays - a.plays);
   const want = all.slice(0, GENRE_ARTISTS).map(e => e.artist);
-  const note = m => { $("a-genre-cap").textContent = m; $("a-gtime-cap").textContent = ""; };
+  const note = m => { $("g-top-cap").textContent = m;
+                      $("g-time-cap").textContent = ""; $("g-table-cap").textContent = ""; };
   note("Looking up genres…");
   const tags = await loadGenres(want, (d, t) =>
     note(`Looking up genres… ${fmtN(d)} / ${fmtN(t)} artists`));
   if (!tags) {
-    clearFigs("fig-genre", "fig-gtime");
+    clearFigs("fig-genre", "fig-gtime"); $("g-table").innerHTML = "";
     note("Genres are unavailable right now — last.fm's tag lookup could not be reached.");
     return;
   }
 
-  const genreOf = new Map();                    // artist -> genre
-  let tagged = 0, taggedPlays = 0;
+  const genreOf = new Map();
+  let untagged = 0;
   for (const e of all.slice(0, GENRE_ARTISTS)) {
     const g = primaryGenre(tags.get(e.artist), e.artist);
-    if (g) { genreOf.set(e.artist, g); tagged++; taggedPlays += e.plays; }
+    if (g) genreOf.set(e.artist, g); else untagged++;
   }
   if (!genreOf.size) {
-    clearFigs("fig-genre", "fig-gtime");
+    clearFigs("fig-genre", "fig-gtime"); $("g-table").innerHTML = "";
     note("No usable genre tags came back for your artists.");
     return;
   }
 
-  const byGenre = new Map();                    // genre -> [plays, artists]
+  /* One aggregate per genre, carrying enough for every panel on the tab. */
+  const G = new Map();
   for (const e of all) {
     const g = genreOf.get(e.artist);
     if (!g) continue;
-    const v = byGenre.get(g) || [0, 0];
-    v[0] += e.plays; v[1]++;
-    byGenre.set(g, v);
+    let x = G.get(g);
+    if (!x) { x = {genre:g, plays:0, artists:0, top:null, first:Infinity, last:0,
+                   qh:{}, yh:{}}; G.set(g, x); }
+    x.plays += e.plays; x.artists++;
+    if (!x.top || e.plays > x.top.plays) x.top = e;
+    x.first = Math.min(x.first, e.first);
+    x.last = Math.max(x.last, e.last);
+    for (const q in S.aqHist.get(e.artist) || {}) {
+      const n = S.aqHist.get(e.artist)[q];
+      x.qh[q] = (x.qh[q] || 0) + n;
+      const y = (q/4)|0;
+      x.yh[y] = (x.yh[y] || 0) + n;
+    }
   }
-  const top = [...byGenre.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, GENRE_SHOW);
-  const x = top.map(([, v]) => 100*v[0]/taggedPlays);
+  const list = [...G.values()].sort((a, b) => b.plays - a.plays);
+  const classified = list.reduce((a, x) => a + x.plays, 0);
+  const solo = list.filter(x => x.artists === 1).length;
+
+  $("g-tag").innerHTML = `<b>${fmtN(list.length)}</b> genres across your top `
+    + `${fmtN(genreOf.size)} artists — ${fmtN(classified)} scrobbles, `
+    + `${(100*classified/S.total).toFixed(0)}% of everything you've played.`;
+  cards("g-cards", [
+    [fmtN(list.length), "Genres you listen to", `${fmtN(solo)} of them from a single artist`],
+    [esc(titleCase(trunc(list[0].genre, 20))), "Your biggest genre",
+     `${(100*list[0].plays/classified).toFixed(0)}% of classified plays · ${fmtN(list[0].artists)} artists`],
+    [fmtN(genreOf.size), "Artists classified",
+     `of your top ${fmtN(GENRE_ARTISTS)}; ${fmtN(untagged)} had no usable tag`],
+    [`${(100*classified/S.total).toFixed(0)}%`, "Of your listening covered",
+     `the unclassified tail is ${fmtN(S.byArtist.size - genreOf.size)} mostly one-play artists`],
+  ]);
+
+  renderGenreBars(list, classified);
+  renderGenreDrift(list, classified);
+  renderGenreTable(list, classified);
+}
+
+function renderGenreBars(list, classified) {
+  const top = list.slice(0, GENRE_SHOW);
+  const x = top.map(g => 100*g.plays/classified);
   plot("fig-genre", [{type:"bar", orientation:"h", x,
-    y: uniqLabels(top.map(([g]) => titleCase(trunc(g, 26)))),
+    y: uniqLabels(top.map(g => titleCase(trunc(g.genre, 26)))),
     text: top.map((_, i) => `  ${x[i].toFixed(1)}%`),
-    hovertext: top.map(([g, v], i) => `<b>${esc(titleCase(g))}</b><br>${fmtN(v[0])} plays `
-      + `(${x[i].toFixed(1)}% of everything classified)<br>${fmtN(v[1])} artist${v[1] === 1 ? "" : "s"}`),
+    hovertext: top.map((g, i) => `<b>${esc(titleCase(g.genre))}</b><br>${fmtN(g.plays)} plays `
+      + `(${x[i].toFixed(1)}% of everything classified)<br>${fmtN(g.artists)} `
+      + `artist${g.artists === 1 ? "" : "s"} · most played: ${esc(trunc(g.top.artist, 24))}`),
     hoverinfo:"text", textposition:"outside", cliponaxis:false,
     textfont:{size:11.5, color:"#e6edf3"},
     marker:{color: top.map((_, i) => PALETTE[i % PALETTE.length])}}],
-    { ...baseLayout(26*top.length + 62), bargap:0.34, margin:{l:12, r:12, t:14, b:24},
-      xaxis:{range:[0, Math.max(...x)*1.5], showgrid:false, zeroline:false,
+    { ...baseLayout(24*top.length + 60), bargap:0.3, margin:{l:12, r:12, t:14, b:24},
+      xaxis:{range:[0, Math.max(...x)*1.45], showgrid:false, zeroline:false,
              showticklabels:false, fixedrange:true},
       yaxis:{autorange:"reversed", showgrid:false, zeroline:false,
              tickfont:{size:11.5, color:"#c9d4e0"}} });
 
-  $("a-genre-cap").innerHTML = `Each artist counted once, under the tag last.fm's listeners agree `
-    + `on most, with the folksonomy noise ("seen live", "favorites", decades, nationalities) `
-    + `stripped out. Based on your top <b>${fmtN(tagged)}</b> artists — `
-    + `<b>${(100*taggedPlays/S.total).toFixed(0)}%</b> of everything you've played. `
-    + `The long tail is not classified: looking up all ${fmtN(all.length)} artists would cost `
-    + `${fmtN(all.length)} requests to move the answer by a few percent.`;
-
-  renderGenreTime(genreOf, top.map(([g]) => g));
+  const covered = top.reduce((a, g) => a + g.plays, 0);
+  $("g-top-cap").innerHTML = `Each artist counted once, under the tag last.fm's listeners agree on `
+    + `most, with the folksonomy noise ("seen live", "favorites", decades, nationalities) stripped `
+    + `out. These <b>${fmtN(top.length)}</b> are ${(100*covered/classified).toFixed(0)}% of your `
+    + `classified listening; the remaining ${fmtN(list.length - top.length)} genres are in the `
+    + `table below. Only your top ${fmtN(GENRE_ARTISTS)} artists are looked up — the tail is `
+    + `thousands of artists with one play each.`;
 }
 
-function renderGenreTime(genreOf, order) {
-  /* Share by year, not by quarter: quarterly shares on six years of data are
-     noise you have to squint through, and the question here is drift. */
-  const years = new Map();                      // year -> genre -> plays
-  for (const [artist, g] of genreOf) {
-    const qh = S.aqHist.get(artist) || {};
-    for (const [q, n] of Object.entries(qh)) {
-      const y = (q/4)|0;
-      if (!years.has(y)) years.set(y, new Map());
-      const m = years.get(y);
-      m.set(g, (m.get(g) || 0) + n);
-    }
+function renderGenreDrift(list, classified) {
+  /* The stacked version of this had a single grey "everything else" block
+     eating 70% of every bar, because 103 genres do not fit in six colours and
+     this account's tail is genuinely long: the top 6 are a third of the
+     listening, the top 20 barely two thirds. A grid has no such budget — every
+     genre gets a row, nothing is lumped, and no bucket is invented. */
+  const years = [...new Set(list.flatMap(g => Object.keys(g.yh).map(Number)))].sort((a, b) => a-b);
+  if (years.length < 2) {
+    clearFigs("fig-gtime");
+    $("g-time-cap").textContent = "A couple of years of history are needed before drift shows up.";
+    return;
   }
-  const ys = [...years.keys()].sort((a, b) => a-b);
-  if (ys.length < 2) { clearFigs("fig-gtime");
-    $("a-gtime-cap").textContent = "A couple of years of history are needed before drift shows up.";
-    return; }
+  const yearTotal = years.map(y => list.reduce((a, g) => a + (g.yh[y] || 0), 0) || 1);
+  const rows = list.slice(0, GENRE_GRID);
+  const src = [...rows].reverse();                  // heatmap builds bottom-up
+  const share = (g, i) => 100*(g.yh[years[i]] || 0)/yearTotal[i];
 
-  const keep = order.slice(0, 6);
-  const rows = keep.concat(["other"]);
-  const totals = ys.map(y => [...years.get(y).values()].reduce((a, b) => a+b, 0) || 1);
-  const traces = rows.map((g, gi) => {
-    const share = ys.map((y, i) => {
-      const m = years.get(y);
-      const n = g === "other"
-        ? [...m.entries()].filter(([k]) => !keep.includes(k)).reduce((a, [, v]) => a+v, 0)
-        : (m.get(g) || 0);
-      return 100*n/totals[i];
-    });
-    return {type:"bar", name: g === "other" ? "everything else" : titleCase(g), x: ys.map(String),
-      y: share, marker:{color: g === "other" ? "#3d4658" : PALETTE[gi % PALETTE.length]},
-      hovertext: share.map((v, i) => `<b>${g === "other" ? "Everything else" : esc(titleCase(g))}</b>`
-        + ` — ${ys[i]}<br>${v.toFixed(1)}% of that year's classified plays`),
-      hoverinfo:"text"};
-  });
-  plot("fig-gtime", traces, { ...baseLayout(400), barmode:"stack", bargap:0.32,
-    showlegend:true, margin:{l:12, r:12, t:52, b:30},
-    legend:{orientation:"h", y:1.1, x:0, font:{size:11, color:"#8b98a8"}},
-    xaxis:{showgrid:false, zeroline:false, tickfont:{size:11.5, color:"#8b98a8"}},
-    yaxis:{ticksuffix:"%", range:[0, 100], showgrid:true, gridcolor:GRID, zeroline:false,
-           tickfont:{size:10.5, color:"#8b98a8"}} });
+  const z = [], txt = [];
+  for (const g of src) {
+    const vals = years.map((_, i) => share(g, i));
+    const mx = Math.max(...vals, 0.0001);
+    // each row against its own best year: absolute share would leave everything
+    // below the top two or three genres uniformly dark
+    z.push(vals.map(v => 100*v/mx));
+    txt.push(years.map((y, i) => `<b>${esc(titleCase(g.genre))}</b> — ${y}`
+      + `<br>${vals[i].toFixed(1)}% of that year's classified plays`
+      + `<br>${fmtN(g.yh[y] || 0)} scrobbles`));
+  }
+  plot("fig-gtime", [{type:"heatmap", z, x: years.map(String), text: txt, hoverinfo:"text",
+    y: uniqLabels(src.map(g => titleCase(trunc(g.genre, 22)) + " · "
+       + (100*g.plays/classified).toFixed(1) + "%")),
+    colorscale: CAL_SCALE, zmin:0, zmax:100, showscale:false, xgap:2, ygap:1.5}],
+    { ...baseLayout(23*rows.length + 60), margin:{l:12, r:16, t:14, b:28},
+      xaxis:{showgrid:false, zeroline:false, tickfont:{size:11, color:"#8b98a8"}},
+      yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
 
-  // biggest mover between the first and last year that has real data
-  const first = ys[0], last = ys[ys.length-1];
-  const shareIn = (y, g) => {
-    const m = years.get(y), t = [...m.values()].reduce((a, b) => a+b, 0) || 1;
-    return 100*(m.get(g) || 0)/t;
-  };
+  // the sharpest arrival and the sharpest departure across the whole span
+  const f = 0, l = years.length - 1;
   let up = null, down = null;
-  for (const g of keep) {
-    const d = shareIn(last, g) - shareIn(first, g);
-    if (!up || d > up[1]) up = [g, d];
-    if (!down || d < down[1]) down = [g, d];
+  for (const g of rows) {
+    const d = share(g, l) - share(g, f);
+    if (!up || d > up[1]) up = [g.genre, d];
+    if (!down || d < down[1]) down = [g.genre, d];
   }
-  $("a-gtime-cap").innerHTML = `The same classification, split by year — each bar is one year's `
-    + `listening, so the question is what share, not how much. Between ${first} and ${last}, `
-    + `<b>${esc(titleCase(up[0]))}</b> ${up[1] >= 0 ? "rose" : "fell"} `
-    + `${Math.abs(up[1]).toFixed(0)} points and <b>${esc(titleCase(down[0]))}</b> `
-    + `${down[1] >= 0 ? "rose" : "fell"} ${Math.abs(down[1]).toFixed(0)}.`;
+  $("g-time-cap").innerHTML = `Your top ${fmtN(rows.length)} genres, one row each, by year — the `
+    + `percentage beside the name is its share of all your classified listening, and each row is `
+    + `shaded against its own strongest year, so a row reads as that genre's own rise and fall. `
+    + `Between ${years[f]} and ${years[l]}, <b>${esc(titleCase(up[0]))}</b> gained `
+    + `${Math.abs(up[1]).toFixed(1)} points of your listening and `
+    + `<b>${esc(titleCase(down[0]))}</b> lost ${Math.abs(down[1]).toFixed(1)}.`;
+}
+
+function renderGenreTable(list, classified) {
+  const fullQ = [...new Set([...S.monthCounts.keys()]
+    .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a, b) => a-b);
+  $("g-table-cap").innerHTML = `All ${fmtN(list.length)} genres, biggest first — including the `
+    + `${fmtN(list.filter(g => g.artists === 1).length)} that come from a single artist.`;
+  buildSongTable("gen", "g-table",
+    `<th>#</th><th>Genre</th><th>Plays</th><th>Share</th><th>Artists</th>
+     <th>Most played</th><th>First heard</th><th>Last heard</th><th>History</th>`,
+    list, (g, i) => {
+      const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
+      return `<tr><td class='rank ${rc}'>${i+1}</td>
+        <td class='song'>${esc(titleCase(trunc(g.genre, 30)))}</td>
+        <td class='num-c'>${fmtN(g.plays)}</td>
+        <td class='num-c'>${(100*g.plays/classified).toFixed(1)}%</td>
+        <td class='num-c'>${fmtN(g.artists)}</td>
+        <td class='artist'>${esc(trunc(g.top.artist, 24))}</td>
+        <td>${fmtDate(g.first)}</td><td>${fmtDate(g.last)}</td>
+        <td>${sparkline(g.qh, fullQ)}</td></tr>`;
+    },
+    {keyFn: g => g.genre.toLowerCase() + " " + g.top.artist.toLowerCase(),
+     noun: "genres", placeholder: "Search genre or artist…"});
 }
 
 /* --------------------------------------------------------- table machinery */
@@ -1976,8 +2042,8 @@ $("brand").addEventListener("click", () => {
   $("app").style.display = "none";
   $("landing").classList.remove("hidden");
 });
-const tabRendered = { artists: false, forgotten: false, evergreen: false };
-const TABS = ["overview", "artists", "forgotten", "evergreen"];
+const tabRendered = { artists: false, genres: false, forgotten: false, evergreen: false };
+const TABS = ["overview", "artists", "genres", "forgotten", "evergreen"];
 
 /* The hash carries the whole view — user, tab and range — so a link to one
    tab survives a reload and can be shared, not just the username. */
@@ -2002,6 +2068,14 @@ function activate(name, opts = {}) {
   if (S && name in tabRendered && !tabRendered[name]) {  // lazy: render on first visit
     tabRendered[name] = true;
     if (name === "artists") renderArtists();
+    else if (name === "genres") {
+      // network-bound and cached across visits; a failure must not blank the tab
+      renderGenres().catch(err => {
+        console.warn("genre lookup failed", err);
+        clearFigs("fig-genre", "fig-gtime");
+        $("g-top-cap").textContent = "Genres are unavailable right now.";
+      });
+    }
     else if (name === "forgotten") renderForgotten();
     else renderEvergreen();
   }
