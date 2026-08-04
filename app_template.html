@@ -113,6 +113,10 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .alink { color:inherit; cursor:pointer; text-decoration:none;
          border-bottom:1px dotted #3a4552; }
 .alink:hover { color:var(--a); border-bottom-color:var(--a); }
+/* the same thing for names Plotly drew as SVG axis labels. fill is set on the
+   node by Plotly, so the hover colour has to outrank it. */
+.js-plotly-plot text.artist-tick { cursor:pointer; }
+.js-plotly-plot text.artist-tick:hover { fill:#a78bfa !important; }
 .gtag { display:inline-flex; align-items:center; gap:6px; background:#161b22;
         border:1px solid #2b3442; border-radius:999px; padding:3px 10px;
         font-size:11.5px; color:#c9d4e0; margin-left:2px; }
@@ -1715,7 +1719,8 @@ function renderArtistSpans(top) {
     + `moving. Every row is scaled against its own biggest month, so this is the shape of each `
     + `relationship rather than its size: a single hot block is an artist who burned out, a long `
     + `warm streak is one who stayed. Rows still lit at the right-hand edge are the `
-    + `${fmtN(alive)} of ${fmtN(rows.length)} still in rotation.`;
+    + `${fmtN(alive)} of ${fmtN(rows.length)} still in rotation. `
+    + `<b>Click any name</b> — here or anywhere else on the site — to open that artist.`;
 }
 
 function renderArtistShape(deep, refM) {
@@ -1814,9 +1819,9 @@ function renderArtistDepth(all) {
 function renderArtistTable(all) {
   const fullQ = [...new Set([...S.monthCounts.keys()]
     .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a, b) => a-b);
-  $("a-table-cap").innerHTML = `Every artist, most played first. The green dot means you've played `
-    + `them in the last ${RECENT_DAYS} days; coverage is the share of months since you first heard `
-    + `them that they turned up in.`;
+  $("a-table-cap").innerHTML = `Every artist, most played first — <b>click a name</b> for their `
+    + `own page. The green dot means you've played them in the last ${RECENT_DAYS} days; coverage `
+    + `is the share of months since you first heard them that they turned up in.`;
   buildSongTable("art", "a-table",
     `<th>#</th><th>Artist</th><th>Plays</th><th>Tracks</th><th>First heard</th>
      <th>Last heard</th><th title='distinct months with at least one play'>Months</th>
@@ -1909,8 +1914,32 @@ function wireArtistClicks(id, names, rowOf) {
     const n = names[i];
     if (n) openArtist(n);
   });
-  const drag = gd.querySelector(".nsewdrag");
-  if (drag) drag.style.cursor = "pointer";
+  /* The y-axis labels ARE the artist names, so they are the first thing anyone
+     tries to click — and on its own, plotly_click never fires for them. Plotly
+     draws tick labels outside the plot area, and sets pointer-events:none on
+     them besides, so they neither emit the event nor would receive a listener
+     of their own. Both have to be undone by hand.
+
+     Keyed by position rather than by matching the label text back to a name:
+     the labels are truncated, uniqLabels pads duplicates, some are escaped and
+     some carry a suffix like " · 80%", so text matching has four ways to go
+     wrong. Measured instead — the tick <text> nodes come out in exactly the
+     trace's own y order on every chart this is used on, heatmaps and bar charts
+     alike — with a length check so a future Plotly that reorders them makes
+     this do nothing rather than open the wrong artist. */
+  const wireTicks = () => {
+    const ticks = gd.querySelectorAll(".yaxislayer-above text");
+    if (ticks.length === names.length) ticks.forEach((t, i) => {
+      if (!names[i]) return;
+      t.style.pointerEvents = "all";      // beats Plotly's own, measured
+      t.classList.add("artist-tick");
+      t.onclick = () => openArtist(names[i]);
+    });
+    const drag = gd.querySelector(".nsewdrag");
+    if (drag) drag.style.cursor = "pointer";
+  };
+  wireTicks();
+  gd.on("plotly_afterplot", wireTicks);   // a resize redraws the labels
 }
 const artistLink = n => `<span class="alink" data-a="${esc(n)}">${esc(trunc(n, 34))}</span>`;
 
