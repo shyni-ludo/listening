@@ -6,6 +6,9 @@ scrobbles.csv
 dashboard.html
 index.html.bak
 
+# wrangler's local account cache — machine-specific, not part of the deploy
+proxy/.wrangler/
+
 # unrelated / personal
 audio-1785586731544.mp3
 viz.py

@@ -4,6 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>you, in music — last.fm listening report</title>
+<meta name="description" content="Enter any last.fm username for a full listening report: every day mapped, your rotating obsessions, the songs you forgot, and the ones that never left.">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#0d1117">
+<!-- Link previews. og:image must be absolute — scrapers do not resolve relative
+     paths — so these carry the deployed URL. Artwork: make_social.py. -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shyni-ludo.github.io/listening/">
+<meta property="og:title" content="you, in music">
+<meta property="og:description" content="A full last.fm listening report — every day mapped, your rotating obsessions, the songs you forgot, and the ones that never left. Runs entirely in your browser.">
+<meta property="og:image" content="https://shyni-ludo.github.io/listening/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="you, in music — a calendar heatmap of a listening history">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -296,177 +311,20 @@ tbody tr.extra.revealed { display:table-row; }
   <footer id="app-footer"></footer>
 </div>
 
-<script>
+<!-- Shared with the Web Worker below. This block runs normally on the page,
+     and its own textContent is what the worker is built from, so compute()
+     exists exactly once. Keep it self-contained: nothing in here may reference
+     the DOM, Plotly, or anything declared in the main script. -->
+<script id="compute-src">
 "use strict";
-/* =================================================================== config */
-const API = "https://ws.audioscrobbler.com/2.0/";
-/* Set by build_web.py from proxy_url.txt. When present the key lives in a
-   Cloudflare Worker (see proxy/) and EMBEDDED_KEY below is empty — nothing
-   secret is shipped to the browser at all. Empty here means the old
-   behaviour: call last.fm directly with the embedded key. */
-const PROXY = "__LASTFM_PROXY__";
-/* Only used when there is no proxy. XOR-folded rather than written as a plain
-   32-hex string, which keeps it out of view-source and away from the scanners
-   that harvest keys off public repos — but it is NOT secret: last.fm takes the
-   key as a URL parameter, so it shows up in any visitor's network tab. */
-const KEY_PAD = "listening-report";
-const EMBEDDED_KEY = (() => {
-  const raw = atob("__LASTFM_API_KEY__");
-  let s = "";
-  for (let i = 0; i < raw.length; i++)
-    s += String.fromCharCode(raw.charCodeAt(i) ^ KEY_PAD.charCodeAt(i % KEY_PAD.length));
-  return s;
-})();
-const CACHE_VERSION = 2;   // bump to invalidate every visitor's cached scrobbles
-const PAGE_SIZE = 200;
-const CONCURRENCY = 8;
-const FORG_MIN_PLAYS = 15, EVER_MIN_PLAYS = 30, EVER_MIN_LIFE = 365, RECENT_DAYS = 90;
-const TABLE_PREVIEW = 100, BAR_ROWS = 25;
+const RECENT_DAYS = 90;
 const EXCLUDE = new Set([["forget it","screwyounick"],["remember when","sam sun"]]
   .map(([t,a]) => (t+"||"+a).toLowerCase()));
 
-const FONT = {family:"Inter, 'Segoe UI', system-ui, sans-serif", color:"#c9d4e0", size:13};
-const GRID = "rgba(130, 150, 175, 0.10)";
-const WARM = [[0,"#3a2438"],[0.35,"#8a2f45"],[0.65,"#e0523c"],[0.85,"#ff8c42"],[1,"#ffd07b"]];
-const COOL = [[0,"#235763"],[0.35,"#177f6f"],[0.65,"#0cb995"],[0.85,"#4cc9f0"],[1,"#c9f7e8"]];
-const CAL_SCALE = [[0,"#232a33"],[0.12,"#3d2a3f"],[0.30,"#712f49"],[0.50,"#b03a44"],
-                   [0.70,"#e85540"],[0.85,"#ff8c42"],[1,"#ffd07b"]];
-const PALETTE = ["#ff5964","#ff9f45","#ffd166","#06d6a0","#4cc9f0",
-                 "#7b8cde","#b388eb","#f72585","#90be6d","#e0aaff"];
-const YEAR_COLORS = ["#712f49","#a83745","#d94a3d","#f26b3d","#ff9e4a","#ffd07b"];
-const CFG = {displaylogo:false, responsive:true};
-
-/* ==================================================================== utils */
-const $ = id => document.getElementById(id);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const fmtN = n => n.toLocaleString("en-US");
-const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function fmtDate(uts) { const d = new Date(uts*1000);
-  return MONTHS[d.getMonth()]+" "+String(d.getDate()).padStart(2,"0")+", "+d.getFullYear(); }
-function fmtSpan(days) {
-  if (days < 60) return days+" d";
-  if (days < 730) return Math.round(days/30.4)+" mo";
-  return (days/365.25).toFixed(1)+" y";
-}
-function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
-  .replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0,n-1)+"…" : s; }
-function baseLayout(height) {
-  return { height, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
-    font:FONT, margin:{l:12,r:12,t:26,b:12}, showlegend:false,
-    hoverlabel:{bgcolor:"#1c2330", bordercolor:"#3a4552",
-                font:{color:"#e6edf3", family:FONT.family}},
-    xaxis:{showgrid:false, zeroline:false, linecolor:"#2b3442", automargin:true},
-    yaxis:{showgrid:true, gridcolor:GRID, zeroline:false, linecolor:"#2b3442", automargin:true} };
-}
-/* Charts that spread their own axis object drop baseLayout's automargin and
-   clip their tick labels — re-apply it here so it can't be forgotten again. */
-/* Empty-state branches return before drawing, so wipe whatever the previous
-   user left in those slots — otherwise their charts sit under "Nothing here yet". */
-function clearFigs(...ids) {
-  for (const id of ids) {
-    const el = $(id);
-    if (el._fullLayout) Plotly.purge(el);
-    el.innerHTML = "";
-  }
-}
-function plot(id, traces, layout) {
-  for (const k of ["xaxis", "yaxis", "xaxis2", "yaxis2"])
-    if (layout[k]) layout[k] = {automargin: true, ...layout[k]};
-  Plotly.newPlot($(id), traces, layout, CFG);
-}
-
-/* date helpers (visitor's local timezone) */
+/* date keys (visitor's local timezone) */
 const mKey = d => d.getFullYear()*12 + d.getMonth();
 const qKey = d => d.getFullYear()*4 + ((d.getMonth()/3)|0);
 const dKey = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-const mLabel = m => MONTHS[m%12]+" "+((m/12)|0);
-const qLabel = q => ((q/4)|0)+" Q"+(q%4+1);
-
-/* ================================================================== idb cache */
-function idbOpen() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open("lfm-cache", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("users");
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  });
-}
-async function idbGet(user) {
-  const db = await idbOpen();
-  return new Promise((res, rej) => {
-    const q = db.transaction("users").objectStore("users").get(user);
-    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
-  });
-}
-async function idbSet(user, val) {
-  const db = await idbOpen();
-  return new Promise((res, rej) => {
-    const q = db.transaction("users","readwrite").objectStore("users").put(val, user);
-    q.onsuccess = () => res(); q.onerror = () => rej(q.error);
-  });
-}
-
-/* ==================================================================== fetch */
-let cancelled = false;
-async function apiPage(user, key, page, fromTs) {
-  const p = new URLSearchParams({method:"user.getrecenttracks", user,
-    limit:PAGE_SIZE, page:String(page), format:"json"});
-  if (fromTs) p.set("from", String(fromTs));
-  // No key means route through the proxy, which adds its own server-side. A
-  // visitor who supplied their own key goes straight to last.fm with it.
-  const viaProxy = PROXY && !key;
-  if (key) p.set("api_key", key);
-  const base = viaProxy ? PROXY : API;
-  const sep = base.includes("?") ? "&" : "?";
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    if (cancelled) throw new Error("cancelled");
-    let d = null;
-    try {
-      const r = await fetch(base + sep + p);
-      d = await r.json();
-    } catch (e) { /* fall through to retry */ }
-    if (d && !d.error) return d;
-    const code = d && d.error;
-    if (code === 6) throw new Error("User not found — check the spelling.");
-    if (code === 4 || code === 10 || code === 26)
-      throw new Error(viaProxy
-        ? "last.fm rejected the server's API key — the site owner needs to refresh it."
-        : "The API key was rejected. Set a valid one under “advanced”.");
-    if (attempt < 4) await sleep(2 ** attempt * 500);
-  }
-  throw new Error("last.fm is having trouble right now — try again in a bit.");
-}
-function parsePage(d, pg) {
-  const out = [];
-  for (const t of ((d.recenttracks && d.recenttracks.track) || [])) {
-    if (!t.date) continue;  // now-playing
-    out.push([+t.date.uts, t.artist["#text"], t.album["#text"], t.name]);
-  }
-  return out;
-}
-async function fetchAll(user, key, fromTs, onProgress) {
-  const first = await apiPage(user, key, 1, fromTs);
-  const attr = first.recenttracks["@attr"];
-  const totalPages = +attr.totalPages || 0;
-  let rows = parsePage(first, 1), done = 1;
-  onProgress(done, Math.max(totalPages,1), rows.length);
-  const queue = [];
-  for (let p = 2; p <= totalPages; p++) queue.push(p);
-  await Promise.all(Array.from({length: CONCURRENCY}, async () => {
-    while (queue.length && !cancelled) {
-      const pg = queue.shift();
-      const d = await apiPage(user, key, pg, fromTs);  // never "rows = rows.concat(await …)" —
-      rows = rows.concat(parsePage(d, pg));            // that drops pages (receiver captured pre-await)
-      onProgress(++done, totalPages, rows.length);
-    }
-  }));
-  if (cancelled) throw new Error("cancelled");
-  return rows;
-}
-
-/* =================================================================== compute */
-let S = null;  // all computed stats, built once per load
 
 function compute(rows) {
   const s = { total: rows.length };
@@ -556,6 +414,223 @@ function compute(rows) {
   return s;
 }
 
+function buildMonthDetail(rows) {
+  const md = new Map();
+  for (const [uts, artist, , track] of rows) {
+    const k = track+"||"+artist, m = mKey(new Date(uts*1000));
+    if (!md.has(k)) md.set(k, new Map());
+    const mm = md.get(k); mm.set(m, (mm.get(m)||0) + 1);
+  }
+  return md;
+}
+</script>
+
+<script>
+"use strict";
+/* =================================================================== config */
+const API = "https://ws.audioscrobbler.com/2.0/";
+/* Set by build_web.py from proxy_url.txt. When present the key lives in a
+   Cloudflare Worker (see proxy/) and EMBEDDED_KEY below is empty — nothing
+   secret is shipped to the browser at all. Empty here means the old
+   behaviour: call last.fm directly with the embedded key. */
+const PROXY = "__LASTFM_PROXY__";
+/* Only used when there is no proxy. XOR-folded rather than written as a plain
+   32-hex string, which keeps it out of view-source and away from the scanners
+   that harvest keys off public repos — but it is NOT secret: last.fm takes the
+   key as a URL parameter, so it shows up in any visitor's network tab. */
+const KEY_PAD = "listening-report";
+const EMBEDDED_KEY = (() => {
+  const raw = atob("__LASTFM_API_KEY__");
+  let s = "";
+  for (let i = 0; i < raw.length; i++)
+    s += String.fromCharCode(raw.charCodeAt(i) ^ KEY_PAD.charCodeAt(i % KEY_PAD.length));
+  return s;
+})();
+const CACHE_VERSION = 2;   // bump to invalidate every visitor's cached scrobbles
+const PAGE_SIZE = 200;
+const CONCURRENCY = 8;
+const FORG_MIN_PLAYS = 15, EVER_MIN_PLAYS = 30, EVER_MIN_LIFE = 365;
+const TABLE_PREVIEW = 100, BAR_ROWS = 25;
+// RECENT_DAYS, EXCLUDE, the date keys and compute() itself live in the
+// #compute-src block above — the worker needs them, and one copy is enough.
+
+const FONT = {family:"Inter, 'Segoe UI', system-ui, sans-serif", color:"#c9d4e0", size:13};
+const GRID = "rgba(130, 150, 175, 0.10)";
+const WARM = [[0,"#3a2438"],[0.35,"#8a2f45"],[0.65,"#e0523c"],[0.85,"#ff8c42"],[1,"#ffd07b"]];
+const COOL = [[0,"#235763"],[0.35,"#177f6f"],[0.65,"#0cb995"],[0.85,"#4cc9f0"],[1,"#c9f7e8"]];
+const CAL_SCALE = [[0,"#232a33"],[0.12,"#3d2a3f"],[0.30,"#712f49"],[0.50,"#b03a44"],
+                   [0.70,"#e85540"],[0.85,"#ff8c42"],[1,"#ffd07b"]];
+const PALETTE = ["#ff5964","#ff9f45","#ffd166","#06d6a0","#4cc9f0",
+                 "#7b8cde","#b388eb","#f72585","#90be6d","#e0aaff"];
+const YEAR_COLORS = ["#712f49","#a83745","#d94a3d","#f26b3d","#ff9e4a","#ffd07b"];
+const CFG = {displaylogo:false, responsive:true};
+
+/* ==================================================================== utils */
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmtN = n => n.toLocaleString("en-US");
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtDate(uts) { const d = new Date(uts*1000);
+  return MONTHS[d.getMonth()]+" "+String(d.getDate()).padStart(2,"0")+", "+d.getFullYear(); }
+function fmtSpan(days) {
+  if (days < 60) return days+" d";
+  if (days < 730) return Math.round(days/30.4)+" mo";
+  return (days/365.25).toFixed(1)+" y";
+}
+function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+  .replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0,n-1)+"…" : s; }
+function baseLayout(height) {
+  return { height, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+    font:FONT, margin:{l:12,r:12,t:26,b:12}, showlegend:false,
+    hoverlabel:{bgcolor:"#1c2330", bordercolor:"#3a4552",
+                font:{color:"#e6edf3", family:FONT.family}},
+    xaxis:{showgrid:false, zeroline:false, linecolor:"#2b3442", automargin:true},
+    yaxis:{showgrid:true, gridcolor:GRID, zeroline:false, linecolor:"#2b3442", automargin:true} };
+}
+/* Charts that spread their own axis object drop baseLayout's automargin and
+   clip their tick labels — re-apply it here so it can't be forgotten again. */
+/* Empty-state branches return before drawing, so wipe whatever the previous
+   user left in those slots — otherwise their charts sit under "Nothing here yet". */
+function clearFigs(...ids) {
+  for (const id of ids) {
+    const el = $(id);
+    // fig-cal and fig-clock-years are containers of one plot per year, so purge
+    // descendants too — dropping them with innerHTML alone strands Plotly state.
+    for (const gd of el.querySelectorAll(".js-plotly-plot")) Plotly.purge(gd);
+    if (el._fullLayout) Plotly.purge(el);
+    el.innerHTML = "";
+  }
+}
+function plot(id, traces, layout) {
+  for (const k of ["xaxis", "yaxis", "xaxis2", "yaxis2"])
+    if (layout[k]) layout[k] = {automargin: true, ...layout[k]};
+  Plotly.newPlot($(id), traces, layout, CFG);
+}
+
+/* date labels (mKey/qKey/dKey are in #compute-src, shared with the worker) */
+const mLabel = m => MONTHS[m%12]+" "+((m/12)|0);
+const qLabel = q => ((q/4)|0)+" Q"+(q%4+1);
+
+/* ================================================================== idb cache */
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("lfm-cache", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("users");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(user) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const q = db.transaction("users").objectStore("users").get(user);
+    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+  });
+}
+async function idbSet(user, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const q = db.transaction("users","readwrite").objectStore("users").put(val, user);
+    q.onsuccess = () => res(); q.onerror = () => rej(q.error);
+  });
+}
+
+/* ==================================================================== fetch */
+let cancelled = false;
+async function apiPage(user, key, page, fromTs) {
+  const p = new URLSearchParams({method:"user.getrecenttracks", user,
+    limit:PAGE_SIZE, page:String(page), format:"json"});
+  if (fromTs) p.set("from", String(fromTs));
+  // No key means route through the proxy, which adds its own server-side. A
+  // visitor who supplied their own key goes straight to last.fm with it.
+  const viaProxy = PROXY && !key;
+  if (key) p.set("api_key", key);
+  const base = viaProxy ? PROXY : API;
+  const sep = base.includes("?") ? "&" : "?";
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    if (cancelled) throw new Error("cancelled");
+    let d = null;
+    try {
+      const r = await fetch(base + sep + p);
+      d = await r.json();
+    } catch (e) { /* fall through to retry */ }
+    if (d && !d.error) return d;
+    const code = d && d.error;
+    if (code === 6) throw new Error("User not found — check the spelling.");
+    if (code === 4 || code === 10 || code === 26)
+      throw new Error(viaProxy
+        ? "last.fm rejected the server's API key — the site owner needs to refresh it."
+        : "The API key was rejected. Set a valid one under “advanced”.");
+    if (attempt < 4) await sleep(2 ** attempt * 500);
+  }
+  throw new Error("last.fm is having trouble right now — try again in a bit.");
+}
+function parsePage(d, pg) {
+  const out = [];
+  for (const t of ((d.recenttracks && d.recenttracks.track) || [])) {
+    if (!t.date) continue;  // now-playing
+    out.push([+t.date.uts, t.artist["#text"], t.album["#text"], t.name]);
+  }
+  return out;
+}
+async function fetchAll(user, key, fromTs, onProgress) {
+  const first = await apiPage(user, key, 1, fromTs);
+  const attr = first.recenttracks["@attr"];
+  const totalPages = +attr.totalPages || 0;
+  let rows = parsePage(first, 1), done = 1;
+  onProgress(done, Math.max(totalPages,1), rows.length);
+  const queue = [];
+  for (let p = 2; p <= totalPages; p++) queue.push(p);
+  await Promise.all(Array.from({length: CONCURRENCY}, async () => {
+    while (queue.length && !cancelled) {
+      const pg = queue.shift();
+      const d = await apiPage(user, key, pg, fromTs);  // never "rows = rows.concat(await …)" —
+      rows = rows.concat(parsePage(d, pg));            // that drops pages (receiver captured pre-await)
+      onProgress(++done, totalPages, rows.length);
+    }
+  }));
+  if (cancelled) throw new Error("cancelled");
+  return rows;
+}
+
+/* =================================================================== compute */
+let S = null;  // all computed stats, built once per load
+let loadedUser = null;   // whose report is on screen — also what the hash says
+
+/* compute() is close to a second of straight-line work on a 170k-scrobble
+   account, and on the main thread that is a second of frozen progress bar and
+   dead scrolling. A worker only has to pay for the structured clone: measured
+   on that account, main-thread blocking went from ~800 ms to ~80 ms (57 ms to
+   serialize the rows out, 23 ms to take the result back).
+
+   The worker is built from the #compute-src block's own source text, so there
+   is one copy of compute() and no second file to keep in step. */
+function computeAsync(rows) {
+  let w;
+  try {
+    const src = $("compute-src").textContent +
+      "\nonmessage = e => { const s = compute(e.data);" +
+      " s.monthDetail = buildMonthDetail(e.data); postMessage(s); };";
+    w = new Worker(URL.createObjectURL(new Blob([src], {type:"text/javascript"})));
+  } catch (err) {
+    return Promise.resolve(computeSync(rows));   // file://, or no worker support
+  }
+  return new Promise(resolve => {
+    const done = s => { w.terminate(); resolve(s); };
+    w.onmessage = e => done(e.data);
+    // Any failure in there is a bug worth surviving, not worth a blank page.
+    w.onerror = err => { console.warn("compute worker failed, falling back", err);
+                         done(computeSync(rows)); };
+    w.postMessage(rows);
+  });
+}
+function computeSync(rows) {
+  const s = compute(rows);
+  s.monthDetail = buildMonthDetail(rows);
+  return s;
+}
+
 /* ==================================================================== render */
 function cards(el, cards) {
   $(el).innerHTML = cards.map(([v,l,s2]) =>
@@ -611,9 +686,66 @@ function renderOverview(user) {
     [`${night.toFixed(0)}%`, "Night owl score", "scrobbles between midnight and 6am"],
   ]);
 
-  renderCalendar(); renderClock(); renderClockYears(); renderVolume(); renderTopCharts();
-  renderConcentration(); renderBump(topA); renderCumulative(topA);
-  renderDiscovery(); renderNewShare();
+  // Ten panels of Plotly is over a second of layout on a large account, and
+  // nine of them start below the fold. Draw each one as it comes into range
+  // instead. The reserved heights are what the charts actually ask for, so the
+  // scrollbar doesn't lurch as they fill in.
+  const nCalYears = new Set([...S.dayCounts.keys()].map(k => k.slice(0,4))).size;
+  const clockCols = Math.max(1, Math.floor($("fig-clock-years").clientWidth / 260));
+  lazyPanels([
+    ["fig-cal",         150 * nCalYears,                            renderCalendar],
+    ["fig-clock",       330,                                        renderClock],
+    ["fig-clock-years", 198 * Math.ceil(S.heatYear.size/clockCols), renderClockYears],
+    ["fig-vol",         330,                                        renderVolume],
+    // three divs, one render: on mobile they stack, so all three need reserving
+    ["fig-top-a fig-top-t fig-top-al", 460,                         renderTopCharts],
+    ["fig-conc",        360,                                        renderConcentration],
+    ["fig-bump",        420,                                        () => renderBump(topA)],
+    ["fig-cum",         400,                                        () => renderCumulative(topA)],
+    ["fig-disc",        340,                                        renderDiscovery],
+    ["fig-newshare",    340,                                        renderNewShare],
+  ]);
+}
+
+let panelObs = null;
+function lazyPanels(panels) {
+  if (panelObs) panelObs.disconnect();   // a new user: drop the old registrations
+  const pending = new Set();
+  const draw = anchor => {
+    if (!pending.delete(anchor)) return;
+    if (panelObs) panelObs.unobserve(anchor);
+    for (const el of anchor._slots) el.style.minHeight = "";   // Plotly owns it now
+    anchor._draw();
+  };
+
+  for (const [ids, reserve, fn] of panels) {
+    const slots = ids.split(" ").map($);
+    // A panel that is still holding the previous user's chart must not be left
+    // sitting there waiting to be scrolled to — wipe it as we re-register.
+    clearFigs(...ids.split(" "));
+    for (const el of slots) el.style.minHeight = reserve + "px";
+    slots[0]._slots = slots;
+    slots[0]._draw = fn;
+    pending.add(slots[0]);
+  }
+
+  if (!("IntersectionObserver" in window)) {        // ancient browser: just draw
+    for (const a of [...pending]) draw(a);
+    return;
+  }
+  panelObs = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) draw(e.target);
+  }, {rootMargin: "400px 0px"});        // a screen of warning, so it feels instant
+  for (const a of pending) panelObs.observe(a);
+
+  // Safety net. An observer that never reports an intersection - a zero-sized
+  // viewport, an odd embedded webview - would leave the report blank, which is
+  // a far worse outcome than drawing everything. If nothing at all has been
+  // drawn shortly after load, assume the observer is not working and draw.
+  const started = pending.size;
+  setTimeout(() => {
+    if (pending.size === started) for (const a of [...pending]) draw(a);
+  }, 1500);
 }
 
 function renderCalendar() {
@@ -1010,7 +1142,7 @@ function renderForgotten() {
            showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}} });
 
   const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
-  const maxS = top.score;
+  const maxS = top.score || 1;      // the filter above excludes score 0; belt-and-braces
   buildSongTable("forg", "f-table",
     `<th>#</th><th>Song</th><th>Artist</th><th>Plays</th><th>Peak month</th><th>Last heard</th>
      <th>Days gone</th><th title='First play to last play'>Lifespan</th><th>History</th>
@@ -1078,7 +1210,7 @@ function renderEvergreen() {
            tickfont:{size:10.5, color:"#8b98a8"}} });
 
   const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
-  const maxS = cand[0].score;
+  const maxS = cand[0].score || 1;   // everScore is always > 0 here; belt-and-braces
   buildSongTable("ever", "e-table",
     `<th>#</th><th>Song</th><th>Artist</th><th>Plays</th><th>First heard</th><th>Last heard</th>
      <th>Lifespan</th><th title='Distinct months with a play / months since first play'>In rotation</th>
@@ -1152,17 +1284,34 @@ function applyTable(prefix) {   // render rows on demand — keeps the DOM light
 document.querySelectorAll(".tab").forEach(btn =>
   btn.addEventListener("click", () => activate(btn.dataset.tab)));
 $("brand").addEventListener("click", () => {
-  history.replaceState(null, "", location.pathname);
+  // push, so back returns to the report the visitor just left
+  history.pushState(null, "", location.pathname);
   $("app").style.display = "none";
   $("landing").classList.remove("hidden");
 });
 const tabRendered = { forgotten: false, evergreen: false };
-function activate(name) {
+const TABS = ["overview", "forgotten", "evergreen"];
+
+/* The hash carries the whole view — user, tab and range — so a link to one
+   tab survives a reload and can be shared, not just the username. */
+function syncHash(mode) {
+  if (!loadedUser) return;                   // landing page owns the URL
+  const p = new URLSearchParams({u: loadedUser});
+  if (document.body.dataset.tab !== "overview") p.set("tab", document.body.dataset.tab);
+  if ($("sel-range").value !== "full") p.set("range", $("sel-range").value);
+  const h = "#" + p;
+  if (h === location.hash) return;
+  history[mode === "push" ? "pushState" : "replaceState"](null, "", h);
+}
+
+function activate(name, opts = {}) {
+  if (!TABS.includes(name)) name = "overview";   // hash is user input
   document.querySelectorAll(".tab").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tabpage").forEach(p =>
     p.classList.toggle("active", p.id === "tab-" + name));
   document.body.dataset.tab = name;
+  if (!opts.silent) syncHash(opts.replace ? "replace" : "push");
   if (S && name in tabRendered && !tabRendered[name]) {  // lazy: render on first visit
     tabRendered[name] = true;
     if (name === "forgotten") renderForgotten();
@@ -1211,8 +1360,8 @@ async function load(user, range, force) {
     }
     if (!rows.length) throw new Error("No scrobbles found for “" + user + "” in that range.");
     $("load-note").textContent = "crunching the numbers…";
-    S = compute(rows);
-    S.monthDetail = buildMonthDetail(rows);
+    S = await computeAsync(rows);
+    loadedUser = user;
     // new data: the lazy tabs are stale, so let activate() build them again
     for (const t in tabRendered) tabRendered[t] = false;
     // Reveal before rendering: a hidden container measures 0, so every chart
@@ -1222,22 +1371,13 @@ async function load(user, range, force) {
     renderOverview(user);
     $("app-footer").textContent = `${fmtN(S.total)} scrobbles · ${esc(user)} on last.fm · rendered locally in your browser`;
     $("loading").classList.add("hidden");
-    history.replaceState(null, "", "#u=" + encodeURIComponent(user));
-    activate(document.body.dataset.tab || "overview");
+    // replace, not push: a load shouldn't leave a half-built URL behind us
+    activate(document.body.dataset.tab || "overview", {replace: true});
   } catch (e) {
     $("loading").classList.add("hidden");
     $("landing").classList.remove("hidden");
     if (e.message !== "cancelled") showErr(e.message);
   }
-}
-function buildMonthDetail(rows) {
-  const md = new Map();
-  for (const [uts, artist, , track] of rows) {
-    const k = track+"||"+artist, m = mKey(new Date(uts*1000));
-    if (!md.has(k)) md.set(k, new Map());
-    const mm = md.get(k); mm.set(m, (mm.get(m)||0) + 1);
-  }
-  return md;
 }
 
 $("btn-go").addEventListener("click", () => {
@@ -1249,6 +1389,23 @@ $("btn-go").addEventListener("click", () => {
 });
 $("inp-user").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-go").click(); });
 $("btn-cancel").addEventListener("click", () => { cancelled = true; });
+
+/* Back/forward now move between tabs, and back out of the report entirely.
+   Rebuilding from the hash rather than from memory keeps the two in step. */
+window.addEventListener("popstate", () => {
+  const h = new URLSearchParams(location.hash.slice(1));
+  const u = h.get("u");
+  if (!u) {                       // back past the report
+    $("app").style.display = "none";
+    $("landing").classList.remove("hidden");
+    return;
+  }
+  if (h.get("range")) $("sel-range").value = h.get("range");
+  if (u !== loadedUser) { load(u, $("sel-range").value); return; }
+  $("landing").classList.add("hidden");
+  $("app").style.display = "block";
+  activate(h.get("tab") || "overview", {silent: true});
+});
 
 /* bootstrap: restore form state + auto-load from #u= */
 (function init() {

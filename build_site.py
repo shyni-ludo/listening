@@ -59,6 +59,13 @@ def esc(s, n=None):
     return ihtml.escape(s)
 
 
+def top_row(df):
+    """Top row of a possibly-empty frame, or None. The card filters below can
+    legitimately match nothing on a short listening history — .iloc[0] would
+    raise IndexError there."""
+    return None if df.empty else df.iloc[0]
+
+
 def fmt_span(days):
     if days < 60:
         return f"{days} d"
@@ -408,17 +415,21 @@ forg["score"] = forg["days_gone"] * (forg["plays"] * forg["peak_plays"]) ** 0.5
 forg = forg.sort_values("score", ascending=False)
 print(f"  {len(forg):,} forgotten candidates")
 dust = forg[forg["days_gone"] >= 365]
-f_top = forg.head(1).iloc[0]
-f_big = dust.sort_values("plays", ascending=False).head(1).iloc[0]
+f_top = top_row(forg)
+f_big = top_row(dust.sort_values("plays", ascending=False))
 f_cards = [
     (f"{len(dust):,}", "Songs gathering dust",
      f"≥{FORG_MIN_PLAYS} plays, unheard for 1+ year"),
     (f"{int(dust['plays'].sum()):,}", "Plays locked in them",
      "lifetime plays of those songs"),
     (esc(f_top["track"], 24), "Most forgotten",
-     f"{f_top['plays']:,} plays · peak {f_top['peak_month'].strftime('%b %Y')}"),
+     f"{f_top['plays']:,} plays · peak {f_top['peak_month'].strftime('%b %Y')}")
+    if f_top is not None else
+    ("—", "Most forgotten", f"no songs with ≥{FORG_MIN_PLAYS} plays"),
     (esc(f_big["track"], 24), "Biggest hit you've dropped",
-     f"{f_big['plays']:,} plays · last {f_big['last']:%b %d, %Y}"),
+     f"{f_big['plays']:,} plays · last {f_big['last']:%b %d, %Y}")
+    if f_big is not None else
+    ("—", "Biggest hit you've dropped", "nothing unheard for a full year yet"),
 ]
 
 b = forg.head(BAR_ROWS)
@@ -469,7 +480,9 @@ fig_forg_sc.update_yaxes(title=dict(text="days since last play",
                          tickfont=dict(size=10.5, color="#8b98a8"))
 
 print("  building full forgotten table...")
-f_max = forg["score"].max()
+# A history where nothing has been silent for long makes every forgotten score
+# zero, and the bar width NaN. Same for an all-new evergreen list below.
+f_max = forg["score"].max() or 1
 f_rows = []
 for i, (_, r) in enumerate(forg.iterrows(), start=1):
     rank_cls = "r1" if i == 1 else "r2" if i == 2 else "r3" if i == 3 else ""
@@ -510,18 +523,22 @@ ever = songs[(songs["plays"] >= EVER_MIN_PLAYS)
 ever["score"] = ever["active_months"] * ever["coverage"]
 ever = ever.sort_values(["score", "active_months"], ascending=False)
 print(f"  {len(ever):,} evergreen candidates")
-e_long = ever.sort_values("lifespan", ascending=False).head(1).iloc[0]
-e_steady = ever[ever["lifespan"] >= 2 * 365].sort_values(
-    ["coverage", "active_months"], ascending=False).head(1).iloc[0]
+e_long = top_row(ever.sort_values("lifespan", ascending=False))
+e_steady = top_row(ever[ever["lifespan"] >= 2 * 365].sort_values(
+    ["coverage", "active_months"], ascending=False))
 e_cards = [
     (f"{len(ever):,}", "Long-term relationships",
      f"≥{EVER_MIN_PLAYS} plays · in rotation 1+ year"),
     (f"{int(ever['alive'].sum()):,}", "Still in rotation",
      f"played in the last {RECENT_DAYS} days"),
     (esc(e_long["track"], 24), "Longest relationship",
-     f"{fmt_span(e_long['lifespan'])} · {esc(e_long['artist'], 20)}"),
+     f"{fmt_span(e_long['lifespan'])} · {esc(e_long['artist'], 20)}")
+    if e_long is not None else
+    ("—", "Longest relationship", "no year-long song relationships yet"),
     (esc(e_steady["track"], 24), "Most reliable",
-     f"played in {100 * e_steady['coverage']:.0f}% of {int(e_steady['avail_months'])} months"),
+     f"played in {100 * e_steady['coverage']:.0f}% of {int(e_steady['avail_months'])} months")
+    if e_steady is not None else
+    ("—", "Most reliable", "needs a song with 2+ years of history"),
 ]
 
 b = ever.head(BAR_ROWS)
@@ -566,7 +583,7 @@ fig_ever_sc.update_yaxes(title=dict(text="% of months with a play",
                          tickfont=dict(size=10.5, color="#8b98a8"))
 
 print("  building full evergreen table...")
-e_max = ever["score"].max()
+e_max = ever["score"].max() or 1
 e_rows = []
 for i, (_, r) in enumerate(ever.iterrows(), start=1):
     rank_cls = "r1" if i == 1 else "r2" if i == 2 else "r3" if i == 3 else ""
