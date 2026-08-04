@@ -88,6 +88,36 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
    width to pack into two rows instead of six, and one chart above another cannot
    be mistaken for one chart's labels belonging to the other. */
 .stack2 { display:grid; gap:16px; }
+/* ---- artist view ----
+   An overlay rather than a seventh tab: you always arrive at it from somewhere,
+   and you want to get back to where you were. It keeps the Artists palette
+   whatever tab launched it, so it always reads as the same kind of thing. */
+.sheet { position:fixed; inset:0; z-index:120; overflow-y:auto; overscroll-behavior:contain;
+         background:rgba(6,9,13,.76); display:flex; justify-content:center;
+         --a:#a78bfa; --b:#7c5cd6; --c:#f0abfc; }
+.sheet.hidden { display:none; }
+.sheet-body { position:relative; width:100%; max-width:960px; min-height:100%;
+              background:#0d1117; padding:0 22px 40px;
+              box-shadow:0 0 70px rgba(0,0,0,.65); }
+/* sticky, not fixed: a fixed button has to be positioned against a centred
+   column, which stops working the moment the viewport is narrower than it */
+.sheet-top { position:sticky; top:0; z-index:5; display:flex; justify-content:flex-end;
+             padding:12px 0 2px; background:linear-gradient(#0d1117 62%, rgba(13,17,23,0)); }
+.sheet-x { background:#1c2330; border:1px solid #2b3442; color:#c9d4e0; cursor:pointer;
+           border-radius:999px; width:34px; height:34px; font-size:15px; line-height:1;
+           font-family:inherit; }
+.sheet-x:hover { border-color:var(--a); color:#e6edf3; }
+.sheet h1 { margin-top:6px; font-size:34px; }
+.sheet .panel:last-of-type { margin-bottom:0; }
+/* every artist name on the site is a door into the view above */
+.alink { color:inherit; cursor:pointer; text-decoration:none;
+         border-bottom:1px dotted #3a4552; }
+.alink:hover { color:var(--a); border-bottom-color:var(--a); }
+.gtag { display:inline-flex; align-items:center; gap:6px; background:#161b22;
+        border:1px solid #2b3442; border-radius:999px; padding:3px 10px;
+        font-size:11.5px; color:#c9d4e0; margin-left:2px; }
+.gtag .dot { width:8px; height:8px; border-radius:50%; background:var(--fc); }
+
 /* ---- segmented control (the Now tab's month/year switch) ---- */
 .seg { display:inline-flex; gap:2px; background:#11151c; border:1px solid #232b36;
        border-radius:999px; padding:3px; margin:26px 0 -12px; }
@@ -220,6 +250,11 @@ tbody tr.extra.revealed { display:table-row; }
   .tbl-controls { flex-wrap:wrap; }
   .search { min-width:100%; }
   .matches { min-width:auto; }
+  .sheet-body { padding:0 12px 24px; }
+  .sheet h1 { font-size:26px; }
+  #fig-ar-tracks, #fig-ar-albums, #fig-ar-run { overflow-x:auto; }
+  #fig-ar-tracks .plot-container, #fig-ar-albums .plot-container { min-width:420px; }
+  #fig-ar-run .plot-container { min-width:520px; }
   .hero h1 { font-size:34px; }
   .hero p { font-size:14px; }
   .form { padding:18px; }
@@ -316,15 +351,6 @@ tbody tr.extra.revealed { display:table-row; }
     <section class="panel"><h2>How the leaderboard was built</h2>
       <p class="cap">Cumulative scrobbles for your all-time top 8 artists.</p>
       <div id="fig-cum"></div></section>
-    <section class="panel"><h2>Exploration vs. routine</h2>
-      <p class="cap">New artists discovered each month (bars) and total unique artists (line).</p>
-      <div id="fig-disc"></div></section>
-    <section class="panel"><h2>New blood vs. old favourites</h2>
-      <p class="cap">Each point is one month: of everything you played that month, how much
-        went to an artist you had never scrobbled before? High means you were out exploring,
-        low means you were replaying what you already loved. The bold line is a 6-month
-        trend — the monthly figure alone is too jumpy to read.</p>
-      <div id="fig-newshare"></div></section>
   </main>
 
   <main id="tab-now" class="tabpage">
@@ -356,6 +382,15 @@ tbody tr.extra.revealed { display:table-row; }
         <div><h3>Lifers</h3><div id="fig-lifer"></div></div></div></section>
     <section class="panel"><h2>How deep you went</h2>
       <p class="cap" id="a-depth-cap"></p><div id="fig-adepth"></div></section>
+    <section class="panel"><h2>Exploration vs. routine</h2>
+      <p class="cap">New artists discovered each month (bars) and total unique artists (line).</p>
+      <div id="fig-disc"></div></section>
+    <section class="panel"><h2>New blood vs. old favourites</h2>
+      <p class="cap">Each point is one month: of everything you played that month, how much
+        went to an artist you had never scrobbled before? High means you were out exploring,
+        low means you were replaying what you already loved. The bold line is a 6-month
+        trend — the monthly figure alone is too jumpy to read.</p>
+      <div id="fig-newshare"></div></section>
     <section class="panel"><h2>Every artist</h2>
       <p class="cap" id="a-table-cap"></p><div id="a-table"></div></section>
   </main>
@@ -412,6 +447,28 @@ tbody tr.extra.revealed { display:table-row; }
   <footer id="app-footer"></footer>
 </div>
 
+<!-- ======================= ARTIST VIEW ======================= -->
+<div class="sheet hidden" id="artist-sheet" role="dialog" aria-modal="true"
+     aria-labelledby="ar-h1">
+  <div class="sheet-body">
+    <div class="sheet-top">
+      <button class="sheet-x" type="button" id="ar-close" aria-label="Close">✕</button>
+    </div>
+    <header><h1 id="ar-h1"></h1><p class="tag" id="ar-tag"></p></header>
+    <div class="cards" id="ar-cards"></div>
+    <section class="panel"><h2>Their whole run</h2>
+      <p class="cap" id="ar-run-cap"></p><div id="fig-ar-run"></div></section>
+    <section class="panel"><h2>What you actually played</h2>
+      <p class="cap" id="ar-what-cap"></p>
+      <div class="grid2">
+        <div class="subcard"><h3>Top tracks</h3><div id="fig-ar-tracks"></div></div>
+        <div class="subcard"><h3>Top albums</h3><div id="fig-ar-albums"></div></div>
+      </div></section>
+    <section class="panel"><h2>When you play them</h2>
+      <p class="cap" id="ar-hour-cap"></p><div id="fig-ar-hour"></div></section>
+  </div>
+</div>
+
 <!-- Shared with the Web Worker below. This block runs normally on the page,
      and its own textContent is what the worker is built from, so compute()
      exists exactly once. Keep it self-contained: nothing in here may reference
@@ -453,6 +510,17 @@ function compute(rows) {
   }
   Object.assign(s, {artists, albums, tracks, dayCounts, hourCounts, monthCounts,
                     artistCounts, pairCounts, albumCounts, firstSeen, minUts, maxUts});
+
+  /* Hour of day per artist, for the artist view's clock. One flat typed array
+     with a row per artist rather than a Map of six thousand little ones: the
+     whole thing is a single block to hand back across the worker boundary, and
+     6k x 24 x 4 bytes is under 600 KB. */
+  const hourIdx = new Map();
+  for (const a of artistCounts.keys()) hourIdx.set(a, hourIdx.size);
+  const hourFlat = new Uint32Array(hourIdx.size * 24);
+  for (const [uts, artist] of rows)
+    hourFlat[hourIdx.get(artist)*24 + new Date(uts*1000).getHours()]++;
+  s.hourIdx = hourIdx; s.hourFlat = hourFlat;
 
   // clock heatmap: 7 days x 24 hours (Mon=0), all-time and split by year
   const blankHeat = () => Array.from({length:7}, () => new Array(24).fill(0));
@@ -883,8 +951,6 @@ function renderOverview(user) {
     ["fig-conc",        360,                                        renderConcentration],
     ["fig-bump",        590,                                        renderBump],
     ["fig-cum",         400,                                        () => renderCumulative(topA)],
-    ["fig-disc",        340,                                        renderDiscovery],
-    ["fig-newshare",    340,                                        renderNewShare],
   ]);
 }
 
@@ -1141,6 +1207,8 @@ function renderTopCharts() {
       xaxis:{showgrid:false, showticklabels:false, zeroline:false, range:[0, vmax*1.02]},
       yaxis:{automargin:true, showgrid:false, zeroline:false, tickfont:{size:10}} });
   }
+  // only the artists panel names artists; tracks and albums name a pairing
+  wireArtistClicks("fig-top-a", panels[0][1].map(r => r[2]).reverse());
 }
 
 /* Two rewrites, both driven by what the data actually says.
@@ -1459,7 +1527,7 @@ function renderForgotten() {
       const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
       const w = 4 + 96*e.score/maxS;
       return `<tr><td class='rank ${rc}'>${i+1}</td>
-        <td class='song'>${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
+        <td class='song'>${esc(trunc(e.track,40))}</td><td class='artist'>${artistLink(e.artist)}</td>
         <td class='num-c'>${fmtN(e.plays)}</td>
         <td>${mLabel(e.peakMonth)} <span class='dim'>(${e.peakPlays}×)</span></td>
         <td>${fmtDate(e.last)}</td><td>${fmtN(e.daysGone)}</td>
@@ -1529,7 +1597,7 @@ function renderEvergreen() {
       const w = 4 + 96*e.score/maxS;
       const dot = e.alive ? `<span class='alive' title='played in the last ${RECENT_DAYS} days'></span>` : "";
       return `<tr><td class='rank ${rc}'>${i+1}</td>
-        <td class='song'>${dot}${esc(trunc(e.track,40))}</td><td class='artist'>${esc(trunc(e.artist,26))}</td>
+        <td class='song'>${dot}${esc(trunc(e.track,40))}</td><td class='artist'>${artistLink(e.artist)}</td>
         <td class='num-c'>${fmtN(e.plays)}</td>
         <td>${fmtDate(e.first)}</td><td>${fmtDate(e.last)}</td>
         <td class='dim'>${fmtSpan(e.lifespan)}</td>
@@ -1590,6 +1658,12 @@ function renderArtists() {
   renderArtistSpans(all.slice(0, ART_SPAN_ROWS));
   renderArtistShape(deep, refM);
   renderArtistDepth(all);
+  /* Both of these opened life on the Overview, which had grown to eleven panels
+     and was the first thing anyone saw. They are about artists arriving and
+     artists being replaced, which is this tab's whole subject, and sitting next
+     to each other there they read as one question asked twice. */
+  renderDiscovery();
+  renderNewShare();
   renderArtistTable(all);
 }
 
@@ -1633,6 +1707,7 @@ function renderArtistSpans(top) {
              tickfont:{size:9.5, color:"#8b98a8"}, tickmode:"array",
              tickvals: months.filter(m => m % 12 === 0).map(mLabel)},
       yaxis:{showgrid:false, zeroline:false, tickfont:{size:11, color:"#c9d4e0"}} });
+  wireArtistClicks("fig-aspan", src.map(e => e.artist), p => p.pointNumber[0]);
 
   const alive = rows.filter(e => e.alive).length;
   $("a-span-cap").innerHTML = `Your ${fmtN(rows.length)} most-played artists, one row each, month `
@@ -1680,6 +1755,7 @@ function renderArtistShape(deep, refM) {
                tickfont:{size:9.5, color:"#8b98a8"},
                tickmode:"array", tickvals: fullQ.filter((_, i) => i % 4 === 0).map(qLabel)},
         yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
+    wireArtistClicks(id, src.map(e => e.artist), p => p.pointNumber[0]);
     return true;
   };
 
@@ -1751,7 +1827,7 @@ function renderArtistTable(all) {
       const dot = e.alive
         ? `<span class='alive' title='played in the last ${RECENT_DAYS} days'></span>` : "";
       return `<tr><td class='rank ${rc}'>${i+1}</td>
-        <td class='song'>${dot}${esc(trunc(e.artist,34))}</td>
+        <td class='song'>${dot}${artistLink(e.artist)}</td>
         <td class='num-c'>${fmtN(e.plays)}</td><td class='num-c'>${fmtN(e.trackCount)}</td>
         <td>${fmtDate(e.first)}</td><td>${fmtDate(e.last)}</td>
         <td class='num-c'>${fmtN(e.activeMonths)}</td>
@@ -1760,6 +1836,237 @@ function renderArtistTable(all) {
         <td>${sparkline(S.aqHist.get(e.artist) || {}, fullQ)}</td></tr>`;
     },
     {keyFn: e => e.artist.toLowerCase(), noun: "artists", placeholder: "Search artist…"});
+}
+
+/* ============================================================== artist view
+   Twenty-nine panels of aggregate statistics and, until this, no way to ask
+   about one artist. Everything here comes out of state compute() already
+   builds, which is the reason it is worth doing: no second pass over the
+   scrobbles, no extra network call, and every table row and bar on the site
+   turns into a door.
+
+   An overlay rather than a seventh tab, because you always arrive from
+   somewhere and want to land back there. Opening pushes a history entry, so
+   the close button, Escape, the backdrop and the browser's own back button all
+   do the same thing. */
+let openArtistName = null;   // the artist on screen; also what the hash carries
+let artistPushed = false;    // did opening leave an entry to go back to
+let ARTIST_RANK = null;      // built on first use, dropped when a new report loads
+let GENRE_OF = null;         // filled in once the genres tab has looked tags up
+
+function artistRank(name) {
+  if (!ARTIST_RANK) {
+    ARTIST_RANK = new Map();
+    [...S.artistCounts.entries()].sort((a, b) => b[1] - a[1])
+      .forEach(([a], i) => ARTIST_RANK.set(a, i + 1));
+  }
+  return ARTIST_RANK.get(name);
+}
+
+function openArtist(name, opts = {}) {
+  if (!S || !S.byArtist.has(name)) return;
+  openArtistName = name;
+  /* Unhidden before drawing: Plotly measures a display:none container as zero
+     and lays every chart out at its 700px fallback instead. */
+  $("artist-sheet").classList.remove("hidden");
+  $("artist-sheet").scrollTop = 0;
+  document.body.style.overflow = "hidden";
+  renderArtistSheet(name);
+  if (!opts.silent) { syncHash("push"); artistPushed = true; }
+}
+
+function closeArtist(opts = {}) {
+  if (!openArtistName) return;
+  // going back rather than rewriting the URL keeps this button and the
+  // browser's own back button from disagreeing about the history stack
+  if (!opts.silent && artistPushed) { history.back(); return; }
+  openArtistName = null;
+  artistPushed = false;
+  $("artist-sheet").classList.add("hidden");
+  document.body.style.overflow = "";
+  clearFigs("fig-ar-run", "fig-ar-tracks", "fig-ar-albums", "fig-ar-hour");
+  if (!opts.silent) syncHash("replace");
+}
+
+/* One delegated listener for every artist name the page will ever render,
+   including rows built long after this runs. */
+document.addEventListener("click", ev => {
+  const el = ev.target.closest && ev.target.closest(".alink[data-a]");
+  if (!el) return;
+  ev.preventDefault();
+  openArtist(el.dataset.a);
+});
+/* Charts hand back a point index, so each one supplies the names in its own
+   drawing order. Setting the cursor on the drag layer is what makes a chart
+   look clickable at all — Plotly's default crosshair says the opposite. */
+function wireArtistClicks(id, names, rowOf) {
+  const gd = $(id);
+  if (!gd || !gd.on) return;
+  gd.on("plotly_click", d => {
+    const p = d.points && d.points[0];
+    if (!p) return;
+    const i = rowOf ? rowOf(p) : p.pointNumber;
+    const n = names[i];
+    if (n) openArtist(n);
+  });
+  const drag = gd.querySelector(".nsewdrag");
+  if (drag) drag.style.cursor = "pointer";
+}
+const artistLink = n => `<span class="alink" data-a="${esc(n)}">${esc(trunc(n, 34))}</span>`;
+
+function renderArtistSheet(name) {
+  const e = S.byArtist.get(name);
+  const rank = artistRank(name);
+  /* pairCounts and albumCounts are keyed "thing||artist", so one scan of each
+     picks up everything of theirs. Both are a few tens of thousands of entries
+     and this only runs on a click. */
+  const suffix = "||" + name;
+  const pick = map => {
+    const out = [];
+    for (const [k, n] of map) if (k.endsWith(suffix)) out.push([k.slice(0, -suffix.length), n]);
+    return out.sort((a, b) => b[1] - a[1]);
+  };
+  const tracks = pick(S.pairCounts), albums = pick(S.albumCounts);
+  const top3 = tracks.slice(0, 3).reduce((a, t) => a + t[1], 0);
+  const hit = GENRE_OF && GENRE_OF.get(name);
+
+  $("ar-h1").textContent = name;
+  $("ar-tag").innerHTML =
+    (e.alive ? `<span class="alive" title="played in the last ${RECENT_DAYS} days"></span>` : "")
+    + `#${fmtN(rank)} of your ${fmtN(S.byArtist.size)} artists &nbsp;·&nbsp; `
+    + `${(100*e.plays/S.total).toFixed(2)}% of everything you've played`
+    + (hit ? ` &nbsp;·&nbsp; <span class="gtag" style="--fc:${FAM_COLOR[hit[1]] || "#8b98a8"}">`
+           + `<span class="dot"></span>${esc(hit[0])}</span>` : "")
+    + ` &nbsp;·&nbsp; <a href="https://www.last.fm/music/${encodeURIComponent(name)}" `
+    + `target="_blank" rel="noopener">last.fm ↗</a>`;
+
+  cards("ar-cards", [
+    [fmtN(e.plays), "Scrobbles", `${fmtSpan(e.lifespan)} between first and last`],
+    [fmtN(e.trackCount), "Tracks you played",
+     tracks.length >= 3 ? `top 3 are ${(100*top3/e.plays).toFixed(0)}% of their plays`
+       : tracks.length === 1 ? "just the one" : "both of them"],
+    [fmtN(e.activeMonths), "Months in rotation",
+     `of ${fmtN(e.availMonths)} since you found them · ${(100*e.coverage).toFixed(0)}% coverage`],
+    [fmtN(e.peakPlays), "Biggest month",
+     `${mLabel(e.peakMonth)} · ${(100*e.burst).toFixed(0)}% of everything you gave them`],
+    [fmtDate(e.first), "First heard",
+     `${fmtSpan(Math.round((S.maxUts - e.first)/86400))} ago`],
+    [fmtDate(e.last), "Last heard",
+     e.alive ? `still in rotation` : `${fmtSpan(e.daysGone)} of silence`],
+  ]);
+
+  arRun(name, e);
+  arTracks(tracks, albums, e);
+  arHour(name, e);
+}
+
+/* their months against the whole account's span, so you can see where in your
+   listening life they sat, not just the shape of their own run */
+function arRun(name, e) {
+  const m0 = mKey(new Date(S.minUts*1000)), m1 = mKey(new Date(S.maxUts*1000));
+  const mh = S.amHist.get(name) || {};
+  const ms = [];
+  for (let m = m0; m <= m1; m++) ms.push(m);
+  const x = ms.map(m => new Date(((m/12)|0), m%12, 1));
+  plot("fig-ar-run", [
+    {type:"bar", x, y: ms.map(m => mh[m] || 0), name:"plays",
+     marker:{color: ms.map(m => m === e.peakMonth ? "#f0abfc" : "#7c5cd6")},
+     hovertemplate:"%{y:,} plays<extra></extra>"},
+    {type:"scatter", x, mode:"lines", yaxis:"y2", name:"share of that month",
+     y: ms.map(m => 100*(mh[m] || 0)/(S.monthCounts.get(m) || 1)),
+     line:{color:"#ffd07b", width:1.8},
+     hovertemplate:"%{y:.1f}% of that month<extra></extra>"}
+  ], { ...baseLayout(330), bargap:0.2, hovermode:"x unified", showlegend:true,
+    margin:{l:46, r:52, t:34, b:12},
+    legend:{orientation:"h", y:1.14, x:0, font:{size:11, color:"#8b98a8"}},
+    xaxis:{tickformat:"%b\n%Y", showgrid:false, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}},
+    yaxis:{tickformat:",d", showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#a78bfa"}},
+    yaxis2:{overlaying:"y", side:"right", showgrid:false, ticksuffix:"%", rangemode:"tozero",
+            tickfont:{size:10.5, color:"#ffd07b"}} });
+
+  const best = 100*e.peakPlays/(S.monthCounts.get(e.peakMonth) || 1);
+  $("ar-run-cap").innerHTML = `Every month of your listening life, so their run is shown `
+    + `against the whole of it rather than cropped to itself. Bars are plays; the gold line `
+    + `is how much of that month <i>belonged</i> to them — which is the one that says whether `
+    + `they were a phase. Their biggest month was <b>${mLabel(e.peakMonth)}</b> at `
+    + `${fmtN(e.peakPlays)} plays, ${best.toFixed(1)}% of everything you listened to that month.`;
+}
+
+function arTracks(tracks, albums, e) {
+  const bars = (id, rows, colour, noun) => {
+    if (!rows.length) {
+      clearFigs(id);
+      $(id).innerHTML = `<p class="cap" style="padding:14px 4px">No ${noun} recorded for them — `
+        + `last.fm often has none for singles and older scrobbles.</p>`;
+      return;
+    }
+    const b = rows.slice(0, 12).reverse();
+    plot(id, [{type:"bar", orientation:"h", x: b.map(r => r[1]),
+      y: uniqLabels(b.map(r => trunc(r[0], 28))),
+      marker:{color: b.map(r => r[1]), colorscale: colour, cmin:0,
+              cmax: Math.max(...b.map(r => r[1]))},
+      text: b.map(r => " " + fmtN(r[1])), textposition:"outside", cliponaxis:false,
+      textfont:{size:10, color:"#c9d4e0"},
+      hovertext: b.map(r => `<b>${esc(r[0])}</b><br>${fmtN(r[1])} plays · `
+        + `${(100*r[1]/e.plays).toFixed(1)}% of everything you played them`),
+      hoverinfo:"text"}],
+      { ...baseLayout(26*b.length + 46), bargap:0.28, margin:{l:8, r:8, t:8, b:22},
+        xaxis:{showgrid:false, zeroline:false, tickfont:{size:9.5, color:"#8b98a8"},
+               range:[0, Math.max(...b.map(r => r[1]))*1.26]},
+        yaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#c9d4e0"}} });
+  };
+  bars("fig-ar-tracks", tracks, COOL, "tracks");
+  bars("fig-ar-albums", albums, WARM, "albums");
+
+  /* How much of an artist you actually explored, as opposed to how often you
+     pressed play on the one song. */
+  const conc = tracks.length ? 100*tracks[0][1]/e.plays : 0;
+  const s = n => n === 1 ? "" : "s";
+  $("ar-what-cap").innerHTML = `${fmtN(e.trackCount)} different track${s(e.trackCount)}`
+    + (albums.length ? ` across ${fmtN(albums.length)} album${s(albums.length)}` : "")
+    + `. `
+    + (tracks.length
+       ? `<b>${esc(tracks[0][0])}</b> alone is ${conc.toFixed(0)}% of everything you played them`
+         // trivially true when there are only one or two tracks to choose between
+         + (conc >= 40 && tracks.length >= 3
+            ? ` — this is one song you love more than an artist you follow.` : `.`)
+       : "");
+}
+
+function arHour(name, e) {
+  if (!S.hourIdx || !S.hourIdx.has(name)) { clearFigs("fig-ar-hour");
+    $("ar-hour-cap").textContent = ""; return; }
+  const row = S.hourIdx.get(name), hrs = [];
+  for (let h = 0; h < 24; h++) hrs.push(S.hourFlat[row*24 + h]);
+  const theirs = hrs.map(n => 100*n/e.plays);
+  const yours = hrs.map((_, h) => 100*(S.hourCounts.get(h) || 0)/S.total);
+  const label = h => String(h).padStart(2, "0") + ":00";
+  plot("fig-ar-hour", [
+    {type:"bar", x: hrs.map((_, h) => h), y: theirs, name: trunc(name, 22),
+     marker:{color:"#7c5cd6"},
+     hovertext: hrs.map((n, h) => `<b>${label(h)}</b><br>${fmtN(n)} plays — `
+       + `${theirs[h].toFixed(1)}% of their scrobbles`), hoverinfo:"text"},
+    {type:"scatter", x: hrs.map((_, h) => h), y: yours, mode:"lines", name:"you, overall",
+     line:{color:"#ffd07b", width:2, shape:"spline"},
+     hovertemplate:"you overall: %{y:.1f}%<extra></extra>"}
+  ], { ...baseLayout(300), bargap:0.25, showlegend:true, margin:{l:44, r:14, t:34, b:30},
+    legend:{orientation:"h", y:1.16, x:0, font:{size:11, color:"#8b98a8"}},
+    xaxis:{tickmode:"array", tickvals:[0,3,6,9,12,15,18,21],
+           ticktext:[0,3,6,9,12,15,18,21].map(label), showgrid:false, zeroline:false,
+           tickfont:{size:10, color:"#8b98a8"}, range:[-0.6, 23.6]},
+    yaxis:{ticksuffix:"%", showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10, color:"#8b98a8"}} });
+
+  // the hour that separates them most from your normal listening
+  let hi = 0, gap = -Infinity;
+  for (let h = 0; h < 24; h++) if (theirs[h] - yours[h] > gap) { gap = theirs[h] - yours[h]; hi = h; }
+  $("ar-hour-cap").innerHTML = `Their scrobbles by hour, against the shape of your listening as `
+    + `a whole. Both are percentages of their own total, so the comparison holds even though `
+    + `you have played them ${fmtN(e.plays)} times and everything else ${fmtN(S.total)}. They `
+    + `lean hardest into <b>${label(hi)}</b> — ${theirs[hi].toFixed(1)}% of their plays against `
+    + `${yours[hi].toFixed(1)}% of yours.`;
 }
 
 /* ====================================================================== now
@@ -2058,6 +2365,7 @@ function renderNowMove(w) {
              range:[Math.min(...pick.map(r => r.d))*1.55 - 0.4,
                     Math.max(...pick.map(r => r.d))*1.55 + 0.4]},
       yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
+  wireArtistClicks("fig-now-move", pick.map(r => r.a));
 
   const up = pick[pick.length-1], down = pick[0];
   $("now-move-cap").innerHTML = `Each artist's share of ${w.short} against their share of `
@@ -2096,6 +2404,7 @@ function renderNowNew(w) {
       xaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#8b98a8"},
              range:[0, Math.max(...b.map(e => e.plays))*1.22]},
       yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
+  wireArtistClicks("fig-now-new", b.map(e => e.artist));
 
   // how many of the window's biggest artists are people it introduced
   const top20 = [...w.cur.entries()].sort((p, q) => q[1] - p[1]).slice(0, 20).map(e => e[0]);
@@ -2163,6 +2472,7 @@ function renderNowQuiet(w) {
       showlegend:true,
       legend:{orientation:"h", x:0, xanchor:"left", y:-0.09, yanchor:"top",
               font:{size:10.5, color:"#c9d4e0"}, bgcolor:"rgba(0,0,0,0)"} });
+  wireArtistClicks("fig-now-quiet", b.map(r => r.a));
 
   $("now-quiet-cap").innerHTML = `Artists you played at least ${QUIET_MIN} times across `
     + `<b>${label}</b> and have barely touched since — the dim bar is what they were worth `
@@ -2403,6 +2713,7 @@ async function renderGenres() {
     const hit = primaryGenre(tags.get(e.artist));
     if (hit) genreOf.set(e.artist, hit); else untagged++;
   }
+  GENRE_OF = genreOf;      // the artist view shows a genre only once this has run
   if (!genreOf.size) {
     clearFigs("fig-genre", "fig-ginside", "fig-gstream", "fig-gmove");
     $("g-table").innerHTML = ""; $("g-chips").innerHTML = "";
@@ -2831,7 +3142,7 @@ function renderGenreTable(list, classified) {
         <td class='num-c'>${fmtN(g.plays)}</td>
         <td class='num-c'>${(100*g.plays/classified).toFixed(1)}%</td>
         <td class='num-c'>${fmtN(g.artists)}</td>
-        <td class='artist'>${esc(trunc(g.top.artist, 24))}</td>
+        <td class='artist'>${artistLink(g.top.artist)}</td>
         <td>${fmtDate(g.first)}</td><td>${fmtDate(g.last)}</td>
         <td>${sparkline(g.qh, fullQ)}</td></tr>`;
     },
@@ -2902,6 +3213,14 @@ function applyTable(prefix) {   // render rows on demand — keeps the DOM light
 /* ================================================================ tabs/main */
 document.querySelectorAll(".tab").forEach(btn =>
   btn.addEventListener("click", () => activate(btn.dataset.tab)));
+$("ar-close").addEventListener("click", () => closeArtist());
+$("artist-sheet").addEventListener("click", ev => {
+  // the backdrop is the sheet itself; a click that lands on the panel is not a dismiss
+  if (ev.target.id === "artist-sheet") closeArtist();
+});
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape" && openArtistName) closeArtist();
+});
 $("brand").addEventListener("click", () => {
   // push, so back returns to the report the visitor just left
   history.pushState(null, "", location.pathname);
@@ -2929,6 +3248,7 @@ function syncHash(mode) {
   const p = new URLSearchParams({u: loadedUser});
   if (document.body.dataset.tab !== "overview") p.set("tab", document.body.dataset.tab);
   if (document.body.dataset.tab === "now" && nowScope !== "year") p.set("scope", nowScope);
+  if (openArtistName) p.set("artist", openArtistName);
   if ($("sel-range").value !== "full") p.set("range", $("sel-range").value);
   const h = "#" + p;
   if (h === location.hash) return;
@@ -3005,6 +3325,8 @@ async function load(user, range, force) {
     loadedUser = user;
     // new data: the lazy tabs are stale, so let activate() build them again
     for (const t in tabRendered) tabRendered[t] = false;
+    ARTIST_RANK = null; GENRE_OF = null;
+    closeArtist({silent: true});
     // Reveal before rendering: a hidden container measures 0, so every chart
     // would be laid out at Plotly's 700px fallback and then resized. The
     // loading overlay still covers this, so nothing flashes.
@@ -3014,6 +3336,8 @@ async function load(user, range, force) {
     $("loading").classList.add("hidden");
     // replace, not push: a load shouldn't leave a half-built URL behind us
     activate(document.body.dataset.tab || "overview", {replace: true});
+    const deepArtist = new URLSearchParams(location.hash.slice(1)).get("artist");
+    if (deepArtist) openArtist(deepArtist, {silent: true});
   } catch (e) {
     $("loading").classList.add("hidden");
     $("landing").classList.remove("hidden");
@@ -3037,6 +3361,7 @@ window.addEventListener("popstate", () => {
   const h = new URLSearchParams(location.hash.slice(1));
   const u = h.get("u");
   if (!u) {                       // back past the report
+    closeArtist({silent: true});
     $("app").style.display = "none";
     $("landing").classList.remove("hidden");
     return;
@@ -3050,6 +3375,9 @@ window.addEventListener("popstate", () => {
   // activate() only draws a tab the first time; stepping back onto an already
   // built Now with the other window selected still has to redraw it
   if (scopeMoved && S && tabRendered.now && document.body.dataset.tab === "now") renderNow();
+  const wantArtist = h.get("artist");
+  if (wantArtist && wantArtist !== openArtistName) openArtist(wantArtist, {silent: true});
+  else if (!wantArtist) closeArtist({silent: true});
 });
 function applyScope(v) {
   const s = v === "month" ? "month" : "year";     // hash is user input
