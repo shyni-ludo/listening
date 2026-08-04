@@ -30,6 +30,7 @@
 body { background:#0d1117; color:#e6edf3; margin:0; padding:0 20px 30px;
        font-family:'Inter','Segoe UI',system-ui,sans-serif; min-height:100vh; }
 body[data-tab='overview']  { --a:#ff8c42; --b:#ff5964; --c:#ffd07b; }
+body[data-tab='now']       { --a:#4cc9f0; --b:#3a86ff; --c:#caf0f8; }
 body[data-tab='artists']   { --a:#a78bfa; --b:#7c5cd6; --c:#f0abfc; }
 body[data-tab='genres']    { --a:#ff6ec7; --b:#c2258f; --c:#ffd6f5; }
 body[data-tab='forgotten'] { --a:#ff8c42; --b:#e0523c; --c:#ffd07b; }
@@ -87,6 +88,14 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
    width to pack into two rows instead of six, and one chart above another cannot
    be mistaken for one chart's labels belonging to the other. */
 .stack2 { display:grid; gap:16px; }
+/* ---- segmented control (the Now tab's month/year switch) ---- */
+.seg { display:inline-flex; gap:2px; background:#11151c; border:1px solid #232b36;
+       border-radius:999px; padding:3px; margin:26px 0 -12px; }
+.seg button { background:none; border:none; color:#8b98a8; font-family:inherit;
+              font-size:13px; font-weight:600; padding:7px 18px; border-radius:999px;
+              cursor:pointer; white-space:nowrap; }
+.seg button:hover { color:#e6edf3; }
+.seg button[aria-pressed="true"] { background:#1c232e; color:var(--a); }
 /* one clickable family per chip, tinted with that family's colour */
 .chips { display:flex; flex-wrap:wrap; gap:7px; margin:2px 0 14px; }
 .chip { display:inline-flex; align-items:center; gap:7px; cursor:pointer;
@@ -198,9 +207,14 @@ tbody tr.extra.revealed { display:table-row; }
   .grid2 { grid-template-columns:minmax(0,1fr); gap:4px; }
   /* 11-column score tables scroll sideways instead of being crushed */
   #f-table, #e-table, #a-table, #g-table, #fig-bump, #fig-aspan,
-  #fig-gstream, #fig-gmove, #fig-ginside { overflow-x:auto; }
+  #fig-gstream, #fig-gmove, #fig-ginside,
+  #fig-now-move, #fig-now-new, #fig-now-quiet { overflow-x:auto; }
   #fig-bump .plot-container, #fig-aspan .plot-container,
-  #fig-gstream .plot-container, #fig-gmove .plot-container { min-width:560px; }
+  #fig-gstream .plot-container, #fig-gmove .plot-container,
+  #fig-now-move .plot-container, #fig-now-new .plot-container,
+  #fig-now-quiet .plot-container { min-width:560px; }
+  .seg { margin:18px 0 -10px; }
+  .seg button { font-size:12.5px; padding:7px 14px; }
   #fig-ginside .plot-container { min-width:300px; }
   #f-table table, #e-table table, #a-table table, #g-table table { min-width:620px; }
   .tbl-controls { flex-wrap:wrap; }
@@ -259,6 +273,7 @@ tbody tr.extra.revealed { display:table-row; }
   <nav class="tabs">
     <div class="brand" id="brand" title="start over">♪ my <em>listening</em></div>
     <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="now">Now</button>
     <button class="tab" data-tab="artists">Artists</button>
     <button class="tab" data-tab="genres">Genres</button>
     <button class="tab" data-tab="forgotten">Forgotten songs</button>
@@ -310,6 +325,23 @@ tbody tr.extra.revealed { display:table-row; }
         low means you were replaying what you already loved. The bold line is a 6-month
         trend — the monthly figure alone is too jumpy to read.</p>
       <div id="fig-newshare"></div></section>
+  </main>
+
+  <main id="tab-now" class="tabpage">
+    <header><h1 id="now-h1">Now</h1><p class="tag" id="now-tag"></p></header>
+    <div class="seg" id="now-seg">
+      <button type="button" data-scope="year" aria-pressed="true">This year</button>
+      <button type="button" data-scope="month" aria-pressed="false">This month</button>
+    </div>
+    <div class="cards" id="now-cards"></div>
+    <section class="panel"><h2>Are you on pace?</h2>
+      <p class="cap" id="now-pace-cap"></p><div id="fig-now-pace"></div></section>
+    <section class="panel"><h2>What's spiking, what's slipping</h2>
+      <p class="cap" id="now-move-cap"></p><div id="fig-now-move"></div></section>
+    <section class="panel"><h2>New to you</h2>
+      <p class="cap" id="now-new-cap"></p><div id="fig-now-new"></div></section>
+    <section class="panel"><h2>Gone quiet</h2>
+      <p class="cap" id="now-quiet-cap"></p><div id="fig-now-quiet"></div></section>
   </main>
 
   <main id="tab-artists" class="tabpage">
@@ -621,6 +653,13 @@ function plot(id, traces, layout) {
 /* date labels (mKey/qKey/dKey are in #compute-src, shared with the worker) */
 const mLabel = m => MONTHS[m%12]+" "+((m/12)|0);
 const qLabel = q => ((q/4)|0)+" Q"+(q%4+1);
+/* dKey back into a Date. Handing "2026-03-13" to the Date constructor instead
+   is wrong in a way that is easy to miss: a bare date string is parsed as UTC
+   by spec and then printed in local time, so every visitor west of Greenwich
+   was shown the day before. Deliberately not used for the streak walk, which
+   subtracts two of these and wants UTC's exactly-24h days — local midnights are
+   23 or 25 hours apart across a daylight-saving change. */
+const dayDate = k => { const p = k.split("-"); return new Date(+p[0], +p[1]-1, +p[2]); };
 
 /* ================================================================== idb cache */
 function idbOpen() {
@@ -819,8 +858,8 @@ function renderOverview(user) {
     [fmtN(S.artists.size), "Unique artists", `${fmtN(S.albums.size)} albums · ${fmtN(S.tracks.size)} tracks`],
     [fmtN(daysSorted.length), "Days with music", `of ${fmtN(spanDays)} days (${(100*daysSorted.length/spanDays).toFixed(0)}%)`],
     [fmtN(Math.round(S.total/spanDays)), "Scrobbles per day", `peak hour: ${String(peakHour).padStart(2,"0")}:00 local`],
-    [fmtN(best.length), "Longest streak (days)", `${fmtDate(+new Date(best[0])/1000)} → ${fmtDate(+new Date(best[best.length-1])/1000)}`],
-    [fmtN(bigDayN), "Biggest day", fmtDate(+new Date(bigDay)/1000)],
+    [fmtN(best.length), "Longest streak (days)", `${fmtDate(+dayDate(best[0])/1000)} → ${fmtDate(+dayDate(best[best.length-1])/1000)}`],
+    [fmtN(bigDayN), "Biggest day", fmtDate(+dayDate(bigDay)/1000)],
     [esc(trunc(topA[0][0],26)), "Top artist", `${fmtN(topA[0][1])} scrobbles`],
     [esc(trunc(tPt,26)), "Top track", `${fmtN(tPn)} plays · ${esc(trunc(tPa,22))}`],
     [`${String(peakHour).padStart(2,"0")}:00`, "Peak listening hour", "your local time"],
@@ -1723,6 +1762,416 @@ function renderArtistTable(all) {
     {keyFn: e => e.artist.toLowerCase(), noun: "artists", placeholder: "Search artist…"});
 }
 
+/* ====================================================================== now
+   Every other tab is lifetime-scoped, which is exactly what buries the last few
+   weeks under eight years of history. This one is the opposite: a single window
+   — the current month or the current year — with every number in it stated
+   against the same account's own baseline. "You played Sleep Token 312 times"
+   is a fact about volume. "Sleep Token is 5.2 points more of this year than of
+   everything before it" is the thing anyone actually opens this tab to find out,
+   and it is the shape every panel here takes.
+
+   "Now" is the newest scrobble, not the wall clock. Forgotten and Evergreen
+   already work that way, and a report for an account that stopped in 2023 is far
+   more use showing that account's last real month than an empty one. The header
+   names the period it settled on, and says so outright when the data is stale.
+
+   Windows are compared like for like. On the 4th of the month, this month is
+   four days old, so it is measured against the first four days of the months
+   before it — never against whole ones. Years the same: through the 4th of
+   August in every year on the chart. The naive version reports a collapse in
+   listening on the 1st of every month and a recovery by the 28th, which is an
+   artefact of the calendar and nothing to do with the listening. */
+const NOW_MIN_PLAYS = 25;   // lifetime floor before an artist can join risers/fallers
+const NOW_BARS = 10;        // bars per direction
+const NOW_THIN = 60;        // fewer plays than this in the window and the charts say so
+const QUIET_MIN = 20;       // plays in the run-up before a silence is worth reporting
+/* The year opens, not the month. On the 3rd of a month there are three days of
+   listening to talk about and half these panels correctly refuse to draw on it;
+   the year always has something in it, and the month is one tap away. */
+let nowScope = "year";
+
+const daysIn = (y, m) => new Date(y, m+1, 0).getDate();
+/* Stepping by calendar date rather than by +86400000: a visitor in a DST zone
+   has two days a year that are not 24 hours long, and the millisecond version
+   double-counts one of them and skips the other. */
+function eachDay(a, b, fn) {
+  for (let d = new Date(a.getFullYear(), a.getMonth(), a.getDate()); d <= b;
+       d = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1)) fn(d);
+}
+
+/* Everything the tab needs about one window, in one place. Per-artist and
+   per-track totals come out of the monthly histograms rather than the raw rows,
+   which is exact here for a reason worth stating: the window always ends at the
+   newest scrobble, so its final month is naturally partial and nothing is being
+   truncated. That does not hold for the comparison windows, which is why those
+   are measured day by day out of dayCounts instead. */
+function nowWindow(scope) {
+  const ref = new Date(S.maxUts*1000);
+  const y = ref.getFullYear(), mo = ref.getMonth(), dd = ref.getDate();
+  const w = {scope, ref, y, mo, dd};
+  if (scope === "year") {
+    w.title = String(y);
+    w.short = "this year";
+    w.months = [];
+    for (let m = y*12; m <= y*12 + mo; m++) w.months.push(m);
+    w.start = new Date(y, 0, 1);
+    w.backStart = k => new Date(y-k, 0, 1);
+    w.backEnd = k => new Date(y-k, mo, Math.min(dd, daysIn(y-k, mo)), 23, 59, 59);
+    w.backLabel = k => String(y-k);
+    w.runUp = Array.from({length:12}, (_, i) => (y-1)*12 + i);   // all of last year
+  } else {
+    w.title = MONTHS[mo] + " " + y;
+    w.short = "this month";
+    w.months = [y*12 + mo];
+    w.start = new Date(y, mo, 1);
+    w.backStart = k => new Date(y, mo-k, 1);      // negative months roll the year back
+    w.backEnd = k => { const d = new Date(y, mo-k, 1);
+      return new Date(d.getFullYear(), d.getMonth(),
+        Math.min(dd, daysIn(d.getFullYear(), d.getMonth())), 23, 59, 59); };
+    w.backLabel = k => { const d = new Date(y, mo-k, 1);
+                         return MONTHS[d.getMonth()] + " " + d.getFullYear(); };
+    w.runUp = Array.from({length:6}, (_, i) => y*12 + mo - 6 + i);
+  }
+
+  w.span = 0;
+  eachDay(w.start, ref, () => w.span++);
+  w.plays = w.months.reduce((n, m) => n + (S.monthCounts.get(m) || 0), 0);
+  w.cur = new Map();
+  for (const [a, mh] of S.amHist) {
+    let n = 0;
+    for (const m of w.months) n += mh[m] || 0;
+    if (n) w.cur.set(a, n);
+  }
+  w.tracks = new Map();
+  for (const [k, mm] of S.monthDetail) {
+    let n = 0;
+    for (const m of w.months) n += mm.get(m) || 0;
+    if (n) w.tracks.set(k, n);
+  }
+  const startTs = +w.start/1000;
+  w.fresh = [...S.firstSeen].filter(([, u]) => u >= startTs).map(([a]) => a);
+
+  /* Only periods the account was around for the whole of. A year the visitor
+     joined halfway through really did hold fewer plays, but putting it on the
+     pace chart as if it were a fair comparison is exactly the kind of quiet lie
+     this tab is meant to avoid. */
+  const minD = new Date(S.minUts*1000);
+  /* Compared at day granularity, not at the instant of the first scrobble.
+     Otherwise an account whose history opens at 09:00 on the 1st of January is
+     judged not to cover that year and loses the whole of it from the chart,
+     over nine hours. */
+  const minDay = new Date(minD.getFullYear(), minD.getMonth(), minD.getDate());
+  w.back = [];
+  for (let k = 1; k <= (scope === "year" ? 12 : 36); k++) {
+    if (w.backEnd(k) < minDay) break;
+    if (w.backStart(k) >= minDay) w.back.push(k);
+  }
+  return w;
+}
+
+/* cumulative plays through one period, one entry per elapsed day. k=0 is the
+   window itself; k>0 walks back the same number of periods. */
+function paceSeries(w, k) {
+  const a = k === 0 ? w.start : w.backStart(k);
+  const b = k === 0 ? w.ref : w.backEnd(k);
+  const ys = [], txt = [];
+  let n = 0;
+  eachDay(a, b, d => {
+    n += S.dayCounts.get(dKey(d)) || 0;
+    ys.push(n);
+    txt.push(MONTHS[d.getMonth()] + " " + String(d.getDate()).padStart(2,"0")
+             + ", " + d.getFullYear());
+  });
+  return {k, ys, txt, label: k === 0 ? w.title : w.backLabel(k),
+          x: ys.map((_, i) => i+1), total: n};
+}
+
+function renderNow() {
+  const w = nowWindow(nowScope);
+  document.querySelectorAll("#now-seg button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.scope === nowScope)));
+  $("now-h1").textContent = w.title;
+
+  const stale = Date.now()/1000 - S.maxUts > 3*86400;
+  $("now-tag").innerHTML = `<b>${esc(loadedUser)}</b> &nbsp;·&nbsp; `
+    + `${fmtDate(+w.start/1000)} – ${fmtDate(S.maxUts)} &nbsp;·&nbsp; ${w.span} days `
+    + `&nbsp;·&nbsp; ${fmtN(w.plays)} scrobbles`
+    + (stale ? `<br>Your newest scrobble is from <b>${fmtDate(S.maxUts)}</b>, so “now” means `
+             + `the period that ended there — not today.` : "")
+    + `<br>Every comparison below stops at the same point in its own period, so a `
+    + `half-finished ${w.scope} is never measured against a whole one.`;
+
+  nowCards(w);
+  renderNowPace(w);
+  renderNowMove(w);
+  renderNowNew(w);
+  renderNowQuiet(w);
+}
+
+function nowCards(w) {
+  const prev = w.back.length ? paceSeries(w, w.back[0]).total : null;
+  const pct = prev ? 100*(w.plays - prev)/prev : null;
+  const days = [];
+  eachDay(w.start, w.ref, d => {
+    const n = S.dayCounts.get(dKey(d));
+    if (n) days.push([dKey(d), n]);
+  });
+  const big = days.length ? days.reduce((a, e) => e[1] > a[1] ? e : a) : null;
+  const topA = [...w.cur.entries()].sort((p, q) => q[1] - p[1])[0];
+  const topT = [...w.tracks.entries()].sort((p, q) => q[1] - p[1])[0];
+  const lifeRate = S.total / (Math.round((S.maxUts - S.minUts)/86400) + 1);
+  cards("now-cards", [
+    [fmtN(w.plays), "Scrobbles",
+     prev === null ? `no earlier ${w.scope} to compare with yet`
+       : `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}% vs ${fmtN(prev)} by the same point in ${w.backLabel(w.back[0])}`],
+    [fmtN(w.cur.size), "Artists",
+     `${fmtN(w.fresh.length)} new to you · ${fmtN(w.tracks.size)} distinct tracks`],
+    [fmtN(days.length), "Days with music",
+     `of ${w.span} days (${(100*days.length/w.span).toFixed(0)}%)`],
+    [fmtN(Math.round(w.plays/w.span)), "Scrobbles per day",
+     `your lifetime average is ${fmtN(Math.round(lifeRate))}`],
+    [big ? fmtN(big[1]) : "—", "Biggest day",
+     big ? fmtDate(+dayDate(big[0])/1000) : "no listening yet"],
+    [topA ? esc(trunc(topA[0], 24)) : "—", "Top artist",
+     topA ? `${fmtN(topA[1])} plays · ${(100*topA[1]/w.plays).toFixed(1)}% of ${w.short}` : "—"],
+    [topT ? esc(trunc(topT[0].split("||")[0], 24)) : "—", "Top track",
+     topT ? `${fmtN(topT[1])} plays · ${esc(trunc(topT[0].split("||")[1], 20))}` : "—"],
+    [fmtN(w.fresh.length), "Artists you met",
+     `first ever scrobbled in ${w.title}`],
+  ]);
+}
+
+/* --------------------------------------------------------------- on pace? */
+const PACE_SHOWN = 5;                                   // prior periods drawn in full
+function renderNowPace(w) {
+  if (!w.back.length) {
+    clearFigs("fig-now-pace");
+    $("now-pace-cap").textContent = `There is no earlier ${w.scope} with a full run of `
+      + `history to compare ${w.title} against yet — this panel fills in once there is one.`;
+    return;
+  }
+  const cur = paceSeries(w, 0);
+  const past = w.back.map(k => paceSeries(w, k));
+  /* Older periods fade rather than take a colour of their own: they are the
+     backdrop the current line is read against, and five saturated lines compete
+     with the one that matters. */
+  const shade = i => `rgba(139,152,168,${(0.62 - 0.09*i).toFixed(2)})`;
+  const traces = past.slice(0, PACE_SHOWN).map((p, i) => ({
+    type:"scatter", mode:"lines", name: p.label, x: p.x, y: p.ys,
+    line:{color: shade(i), width: 1.6},
+    customdata: p.txt.map((t, j) => `<b>${esc(p.label)}</b><br>through ${t}<br>${fmtN(p.ys[j])} scrobbles`),
+    hovertemplate:"%{customdata}<extra></extra>"}));
+
+  /* The typical line is the median across every complete earlier period, not
+     the mean: one runaway month drags a mean up by more than it says anything
+     about a normal one. */
+  if (past.length >= 3) {
+    /* Cut to the shortest period, not the longest. A leap year is one day
+       longer than the others, and a median taken over whatever happened to
+       reach that day is a median of one — it jumped to the single leap year's
+       total at the right-hand end. */
+    const len = Math.min(w.span, ...past.map(p => p.ys.length));
+    const med = [];
+    for (let i = 0; i < len; i++) {
+      const v = past.map(p => p.ys[i]).filter(n => n !== undefined).sort((a, b) => a-b);
+      med.push(v[v.length >> 1]);
+    }
+    traces.push({type:"scatter", mode:"lines", name:`typical ${w.scope}`,
+      x: med.map((_, i) => i+1), y: med,
+      line:{color:"#8b98a8", width:1.6, dash:"dot"},
+      hovertemplate:`median of ${past.length} earlier ${w.scope}s<br>%{y:,} scrobbles<extra></extra>`});
+  }
+  traces.push({type:"scatter", mode:"lines", name: cur.label, x: cur.x, y: cur.ys,
+    line:{color:"#4cc9f0", width:3},
+    customdata: cur.txt.map((t, j) => `<b>${esc(cur.label)}</b><br>through ${t}<br>${fmtN(cur.ys[j])} scrobbles`),
+    hovertemplate:"%{customdata}<extra></extra>"});
+
+  const ticks = [];
+  if (w.scope === "year") {
+    let acc = 0;
+    for (let m = 0; m <= w.mo; m++) { ticks.push([acc+1, MONTHS[m]]); acc += daysIn(w.y, m); }
+  } else {
+    for (let d = 1; d <= w.span; d += 5) ticks.push([d, String(d)]);
+  }
+  plot("fig-now-pace", traces, { ...baseLayout(370), hovermode:"x unified",
+    margin:{l:12, r:12, t:10, b:26},
+    xaxis:{showgrid:false, zeroline:false, tickmode:"array",
+           tickvals: ticks.map(t => t[0]), ticktext: ticks.map(t => t[1]),
+           tickfont:{size:10, color:"#8b98a8"}, range:[1, Math.max(2, w.span)]},
+    yaxis:{showgrid:true, gridcolor:GRID, zeroline:false, tickformat:",d",
+           tickfont:{size:10, color:"#8b98a8"}},
+    showlegend:true,
+    legend:{orientation:"h", x:0, xanchor:"left", y:-0.1, yanchor:"top",
+            font:{size:10.5, color:"#c9d4e0"}, bgcolor:"rgba(0,0,0,0)"} });
+
+  const p1 = past[0], d = p1.total ? 100*(w.plays - p1.total)/p1.total : null;
+  $("now-pace-cap").innerHTML = `Cumulative scrobbles, every ${w.scope} cut off at the same `
+    + `point: ${w.span} ${w.span === 1 ? "day" : "days"} in. `
+    + (d === null ? "" : `You are at <b>${fmtN(w.plays)}</b> against ${fmtN(p1.total)} by this `
+        + `point in ${esc(p1.label)} — ${Math.abs(d).toFixed(0)}% `
+        + `${d >= 0 ? "ahead" : "behind"}. `)
+    + `Where the bright line sits against the pack is the whole panel; where it `
+    + `changes slope is when something changed.`;
+}
+
+/* ------------------------------------------------------- risers and fallers */
+function renderNowMove(w) {
+  const basePlays = S.total - w.plays;
+  if (basePlays < 200 || w.plays < NOW_THIN) {
+    clearFigs("fig-now-move");
+    $("now-move-cap").textContent = basePlays < 200
+      ? `Almost everything you have scrobbled falls inside ${w.title}, so there is no `
+        + `earlier listening to measure it against yet.`
+      : `Only ${fmtN(w.plays)} scrobbles so far in ${w.title} — too few for a share of the `
+        + `mix to mean much. This fills in as the ${w.scope} goes on.`;
+    return;
+  }
+  const rows = [];
+  for (const [a, tot] of S.artistCounts) {
+    if (tot < NOW_MIN_PLAYS) continue;
+    const cw = w.cur.get(a) || 0, base = tot - cw;
+    const cs = 100*cw/w.plays, bs = 100*base/basePlays;
+    rows.push({a, cw, base, cs, bs, d: cs - bs});
+  }
+  rows.sort((p, q) => p.d - q.d);                       // bar charts build bottom-up
+  const pick = rows.length <= 2*NOW_BARS ? rows
+    : rows.slice(0, NOW_BARS).concat(rows.slice(-NOW_BARS));
+  if (!pick.length) {
+    clearFigs("fig-now-move");
+    $("now-move-cap").textContent = `No artist has reached ${NOW_MIN_PLAYS} lifetime plays yet.`;
+    return;
+  }
+  plot("fig-now-move", [{type:"bar", orientation:"h", x: pick.map(r => r.d),
+    y: uniqLabels(pick.map(r => trunc(r.a, 26))),
+    marker:{color: pick.map(r => r.d >= 0 ? "#06d6a0" : "#ff5964")},
+    text: pick.map(r => (r.d >= 0 ? " +" : " ") + r.d.toFixed(1)),
+    textposition:"outside", cliponaxis:false, textfont:{size:10.5, color:"#c9d4e0"},
+    hovertext: pick.map(r => `<b>${esc(r.a)}</b><br>${r.cs.toFixed(1)}% of ${w.short} `
+      + `(${fmtN(r.cw)} plays)<br>${r.bs.toFixed(1)}% of everything before `
+      + `(${fmtN(r.base)} plays)<br>${r.d >= 0 ? "up" : "down"} ${Math.abs(r.d).toFixed(1)} points`),
+    hoverinfo:"text"}],
+    { ...baseLayout(30*pick.length + 60), bargap:0.3, margin:{l:12, r:12, t:10, b:34},
+      xaxis:{showgrid:false, zeroline:true, zerolinecolor:"#3a4552", zerolinewidth:1,
+             title:{text:"percentage points", font:{size:10, color:"#8b98a8"}},
+             tickfont:{size:10, color:"#8b98a8"},
+             range:[Math.min(...pick.map(r => r.d))*1.55 - 0.4,
+                    Math.max(...pick.map(r => r.d))*1.55 + 0.4]},
+      yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
+
+  const up = pick[pick.length-1], down = pick[0];
+  $("now-move-cap").innerHTML = `Each artist's share of ${w.short} against their share of `
+    + `every scrobble that came before it — so this is what changed, not what is biggest. `
+    + `<b>${esc(up.a)}</b> is up ${up.d.toFixed(1)} points`
+    + (down.d < 0 ? ` and <b>${esc(down.a)}</b> is down ${Math.abs(down.d).toFixed(1)}` : "")
+    + `. Artists under ${NOW_MIN_PLAYS} lifetime plays are left out, so nobody reaches this `
+    + `chart on the strength of a handful of scrobbles.`;
+}
+
+/* ------------------------------------------------------------- new arrivals */
+function renderNowNew(w) {
+  /* Their first scrobble is inside the window and the window ends at the newest
+     scrobble there is, so for these artists lifetime plays and window plays are
+     the same number by construction. */
+  const rows = w.fresh.map(a => S.byArtist.get(a)).filter(Boolean)
+    .sort((p, q) => q.plays - p.plays).slice(0, NOW_BARS + 2);
+  if (!rows.length) {
+    clearFigs("fig-now-new");
+    $("now-new-cap").textContent = `Every artist you played in ${w.title} was someone you had `
+      + `already heard before it started.`;
+    return;
+  }
+  const b = [...rows].reverse();
+  plot("fig-now-new", [{type:"bar", orientation:"h", x: b.map(e => e.plays),
+    y: uniqLabels(b.map(e => trunc(e.artist, 26))),
+    marker:{color: b.map(e => e.plays), colorscale:COOL,
+            cmin:0, cmax:Math.max(...b.map(e => e.plays))},
+    text: b.map(e => " " + fmtN(e.plays)), textposition:"outside", cliponaxis:false,
+    textfont:{size:10.5, color:"#c9d4e0"},
+    hovertext: b.map(e => `<b>${esc(e.artist)}</b><br>first heard ${fmtDate(e.first)}`
+      + `<br>${fmtN(e.plays)} plays · ${fmtN(e.trackCount)} tracks`
+      + `<br>best month: ${mLabel(e.peakMonth)} (${fmtN(e.peakPlays)})`),
+    hoverinfo:"text"}],
+    { ...baseLayout(30*b.length + 54), bargap:0.3, margin:{l:12, r:12, t:10, b:26},
+      xaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#8b98a8"},
+             range:[0, Math.max(...b.map(e => e.plays))*1.22]},
+      yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
+
+  // how many of the window's biggest artists are people it introduced
+  const top20 = [...w.cur.entries()].sort((p, q) => q[1] - p[1]).slice(0, 20).map(e => e[0]);
+  const broke = top20.filter(a => w.fresh.includes(a)).length;
+  const share = w.fresh.reduce((n, a) => n + (w.cur.get(a) || 0), 0);
+  $("now-new-cap").innerHTML = `Artists whose very first scrobble on this account falls inside `
+    + `${w.title}, biggest first. You met <b>${fmtN(w.fresh.length)}</b> of them, and they `
+    + `account for ${(100*share/w.plays).toFixed(1)}% of everything you played `
+    /* Withheld when every artist in the window is a new one — on an account
+       young enough for that, "20 of them are already in your top 20" is a
+       tautology dressed up as a finding. */
+    + `${w.short}` + (broke && w.fresh.length < w.cur.size
+      ? ` — <b>${broke}</b> ${broke === 1 ? "is" : "are"} already in your top 20 for the period.`
+      : `.`);
+}
+
+/* ---------------------------------------------------------------- gone quiet */
+function renderNowQuiet(w) {
+  const runUp = w.runUp.filter(m => S.monthCounts.has(m));
+  if (runUp.length < 2) {
+    clearFigs("fig-now-quiet");
+    $("now-quiet-cap").textContent = `This needs a couple of months of listening before `
+      + `${w.title} to compare against, and there isn't one yet.`;
+    return;
+  }
+  const label = mLabel(runUp[0]) + " – " + mLabel(runUp[runUp.length-1]);
+  const rows = [];
+  for (const [a, mh] of S.amHist) {
+    let n = 0;
+    for (const m of runUp) n += mh[m] || 0;
+    if (n < QUIET_MIN) continue;
+    const cw = w.cur.get(a) || 0;
+    if (cw > 0.3*n) continue;                 // still around; not a disappearance
+    rows.push({a, before:n, now:cw});
+  }
+  rows.sort((p, q) => (q.before - q.now) - (p.before - p.now));
+  const b = rows.slice(0, NOW_BARS + 2).reverse();
+  if (!b.length) {
+    clearFigs("fig-now-quiet");
+    $("now-quiet-cap").innerHTML = `Nobody has dropped out. Every artist you played `
+      + `${QUIET_MIN}+ times in ${label} is still turning up in ${w.title}.`;
+    return;
+  }
+  /* Overlaid rather than grouped: the long dim bar is who they were and the
+     short bright one is what is left of them, and reading that as one bar
+     shrinking is the entire point. Grouped pairs make it a puzzle. */
+  plot("fig-now-quiet", [
+    {type:"bar", orientation:"h", name: label, x: b.map(r => r.before),
+     y: uniqLabels(b.map(r => trunc(r.a, 26))), width:0.62,
+     marker:{color:"#3d4653"},
+     hovertext: b.map(r => `<b>${esc(r.a)}</b><br>${fmtN(r.before)} plays in ${label}`),
+     hoverinfo:"text"},
+    {type:"bar", orientation:"h", name: w.title, x: b.map(r => r.now),
+     y: uniqLabels(b.map(r => trunc(r.a, 26))), width:0.26,
+     marker:{color:"#ff8c42"},
+     text: b.map(r => ` ${fmtN(r.before)} → ${fmtN(r.now)}`),
+     textposition:"outside", cliponaxis:false, textfont:{size:10.5, color:"#c9d4e0"},
+     hovertext: b.map(r => `<b>${esc(r.a)}</b><br>${fmtN(r.now)} plays in ${w.title}`),
+     hoverinfo:"text"}],
+    { ...baseLayout(30*b.length + 74), barmode:"overlay", bargap:0.3,
+      margin:{l:12, r:12, t:10, b:34},
+      xaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#8b98a8"},
+             range:[0, Math.max(...b.map(r => r.before))*1.34]},
+      yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}},
+      showlegend:true,
+      legend:{orientation:"h", x:0, xanchor:"left", y:-0.09, yanchor:"top",
+              font:{size:10.5, color:"#c9d4e0"}, bgcolor:"rgba(0,0,0,0)"} });
+
+  $("now-quiet-cap").innerHTML = `Artists you played at least ${QUIET_MIN} times across `
+    + `<b>${label}</b> and have barely touched since — the dim bar is what they were worth `
+    + `then, the bright one what is left of them in ${w.title}. The two periods are `
+    + `different lengths and are named rather than divided, so read them as two facts `
+    + `about the same artist, not as a rate. Anyone still getting a third of their old `
+    + `share is treated as present and left out.`;
+}
+
 /* =================================================================== genres */
 /* last.fm has no genre field. It has tags, which are a folksonomy: alongside
    real genres people file artists under "seen live", "favorites", decades,
@@ -2459,15 +2908,27 @@ $("brand").addEventListener("click", () => {
   $("app").style.display = "none";
   $("landing").classList.remove("hidden");
 });
-const tabRendered = { artists: false, genres: false, forgotten: false, evergreen: false };
-const TABS = ["overview", "artists", "genres", "forgotten", "evergreen"];
+/* The month/year switch redraws in place — it is a different window on the same
+   data, not a different tab, so it must not go through tabRendered's once-only
+   gate. */
+document.querySelectorAll("#now-seg button").forEach(btn =>
+  btn.addEventListener("click", () => {
+    if (nowScope === btn.dataset.scope) return;
+    nowScope = btn.dataset.scope;
+    if (S) renderNow();
+    syncHash("push");
+  }));
+const tabRendered = { now: false, artists: false, genres: false, forgotten: false,
+                      evergreen: false };
+const TABS = ["overview", "now", "artists", "genres", "forgotten", "evergreen"];
 
-/* The hash carries the whole view — user, tab and range — so a link to one
-   tab survives a reload and can be shared, not just the username. */
+/* The hash carries the whole view — user, tab, range and window — so a link to
+   one tab survives a reload and can be shared, not just the username. */
 function syncHash(mode) {
   if (!loadedUser) return;                   // landing page owns the URL
   const p = new URLSearchParams({u: loadedUser});
   if (document.body.dataset.tab !== "overview") p.set("tab", document.body.dataset.tab);
+  if (document.body.dataset.tab === "now" && nowScope !== "year") p.set("scope", nowScope);
   if ($("sel-range").value !== "full") p.set("range", $("sel-range").value);
   const h = "#" + p;
   if (h === location.hash) return;
@@ -2484,7 +2945,8 @@ function activate(name, opts = {}) {
   if (!opts.silent) syncHash(opts.replace ? "replace" : "push");
   if (S && name in tabRendered && !tabRendered[name]) {  // lazy: render on first visit
     tabRendered[name] = true;
-    if (name === "artists") renderArtists();
+    if (name === "now") renderNow();
+    else if (name === "artists") renderArtists();
     else if (name === "genres") {
       // network-bound and cached across visits; a failure must not blank the tab
       renderGenres().catch(err => {
@@ -2580,11 +3042,21 @@ window.addEventListener("popstate", () => {
     return;
   }
   if (h.get("range")) $("sel-range").value = h.get("range");
+  const scopeMoved = applyScope(h.get("scope"));
   if (u !== loadedUser) { load(u, $("sel-range").value); return; }
   $("landing").classList.add("hidden");
   $("app").style.display = "block";
   activate(h.get("tab") || "overview", {silent: true});
+  // activate() only draws a tab the first time; stepping back onto an already
+  // built Now with the other window selected still has to redraw it
+  if (scopeMoved && S && tabRendered.now && document.body.dataset.tab === "now") renderNow();
 });
+function applyScope(v) {
+  const s = v === "month" ? "month" : "year";     // hash is user input
+  if (s === nowScope) return false;
+  nowScope = s;
+  return true;
+}
 
 /* bootstrap: restore form state + auto-load from #u= */
 (function init() {
@@ -2593,6 +3065,7 @@ window.addEventListener("popstate", () => {
   const h = new URLSearchParams(location.hash.slice(1));
   const u = h.get("u");
   if (h.get("tab")) document.body.dataset.tab = h.get("tab");
+  if (h.get("scope")) applyScope(h.get("scope"));
   if (u) {
     $("inp-user").value = u;
     if (h.get("range")) $("sel-range").value = h.get("range");
