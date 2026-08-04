@@ -76,6 +76,25 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 .gridy { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px; }
 .grid2 h3, .grid3 h3 { color:#e6edf3; font-size:14px; margin:4px 0 0; text-align:center; }
+/* Two charts sharing a panel edge-to-edge read as one: the left chart's bands
+   and the right chart's row labels ended up adjacent, and the labels looked like
+   they belonged to the bands. Give each its own boxed field so the boundary is
+   unmistakable. */
+.subcard { background:#11151c; border:1px solid #222b36; border-radius:10px;
+           padding:8px 8px 4px; min-width:0; }
+.subcard h3 { margin:2px 0 4px; }
+.grid2.split { gap:20px; }
+/* one clickable family per chip, tinted with that family's colour */
+.chips { display:flex; flex-wrap:wrap; gap:7px; margin:2px 0 14px; }
+.chip { display:inline-flex; align-items:center; gap:7px; cursor:pointer;
+        background:#161b22; border:1px solid #2b3442; color:#c9d4e0;
+        border-radius:999px; padding:5px 12px; font:inherit; font-size:12px;
+        line-height:1.3; transition:border-color .12s, background .12s; }
+.chip:hover { border-color:#44505f; color:#e6edf3; }
+.chip .dot { width:9px; height:9px; border-radius:50%; background:var(--fc); flex:none; }
+.chip .pct { color:#8b98a8; font-size:11px; }
+.chip[aria-pressed="true"] { background:#1c232e; border-color:var(--fc); color:#e6edf3; }
+.chip[aria-pressed="true"] .pct { color:#c9d4e0; }
 footer { color:#5d6a78; font-size:12px; text-align:center; margin:44px 0 8px; }
 
 /* ---- tables ---- */
@@ -176,9 +195,10 @@ tbody tr.extra.revealed { display:table-row; }
   .grid2 { grid-template-columns:minmax(0,1fr); gap:4px; }
   /* 11-column score tables scroll sideways instead of being crushed */
   #f-table, #e-table, #a-table, #g-table, #fig-bump, #fig-aspan,
-  #fig-gstream, #fig-gmove { overflow-x:auto; }
+  #fig-gstream, #fig-gmove, #fig-ginside { overflow-x:auto; }
   #fig-bump .plot-container, #fig-aspan .plot-container,
   #fig-gstream .plot-container, #fig-gmove .plot-container { min-width:520px; }
+  #fig-ginside .plot-container { min-width:300px; }
   #f-table table, #e-table table, #a-table table, #g-table table { min-width:620px; }
   .tbl-controls { flex-wrap:wrap; }
   .search { min-width:100%; }
@@ -311,11 +331,14 @@ tbody tr.extra.revealed { display:table-row; }
     <div class="cards" id="g-cards"></div>
     <section class="panel"><h2>What you actually listen to</h2>
       <p class="cap" id="g-top-cap"></p><div id="fig-genre"></div></section>
+    <section class="panel"><h2>Inside each family</h2>
+      <p class="cap" id="g-in-cap"></p>
+      <div class="chips" id="g-chips"></div><div id="fig-ginside"></div></section>
     <section class="panel"><h2>How your taste moved</h2>
       <p class="cap" id="g-time-cap"></p>
-      <div class="grid2">
-        <div><h3>What each quarter was made of</h3><div id="fig-gstream"></div></div>
-        <div><h3>What grew, what faded</h3><div id="fig-gmove"></div></div>
+      <div class="grid2 split">
+        <div class="subcard"><h3>What each quarter was made of</h3><div id="fig-gstream"></div></div>
+        <div class="subcard"><h3>What grew, what faded</h3><div id="fig-gmove"></div></div>
       </div></section>
     <section class="panel"><h2>Every genre</h2>
       <p class="cap" id="g-table-cap"></p><div id="g-table"></div></section>
@@ -1915,7 +1938,8 @@ async function renderGenres() {
   const tags = await loadGenres(want, (d, t) =>
     note(`Looking up genres… ${fmtN(d)} / ${fmtN(t)} artists`));
   if (!tags) {
-    clearFigs("fig-genre", "fig-gstream", "fig-gmove"); $("g-table").innerHTML = "";
+    clearFigs("fig-genre", "fig-ginside", "fig-gstream", "fig-gmove");
+    $("g-table").innerHTML = ""; $("g-chips").innerHTML = "";
     note("Genres are unavailable right now — last.fm's tag lookup could not be reached.");
     return;
   }
@@ -1927,7 +1951,8 @@ async function renderGenres() {
     if (hit) genreOf.set(e.artist, hit); else untagged++;
   }
   if (!genreOf.size) {
-    clearFigs("fig-genre", "fig-gstream", "fig-gmove"); $("g-table").innerHTML = "";
+    clearFigs("fig-genre", "fig-ginside", "fig-gstream", "fig-gmove");
+    $("g-table").innerHTML = ""; $("g-chips").innerHTML = "";
     note("No usable genre tags came back for your artists.");
     return;
   }
@@ -1974,8 +1999,73 @@ async function renderGenres() {
   ]);
 
   renderGenreBars(list, classified);
+  renderGenreInside(list, fams, classified);
   renderGenreDrift(fams);
   renderGenreTable(list, classified);
+}
+
+/* A family is a useful unit for drift and a lossy one for describing taste:
+   "Pop" here is 60% actual pop but also 14% hyperpop, and "Hip-Hop" is as much
+   emo rap and trap as it is rap. The families are what the panel below plots, so
+   this is where you open one up and see what is actually inside it. Held at
+   module scope because the chips redraw the chart without re-running the whole
+   tab — and re-running it would re-hit the network. */
+let GENRE_INSIDE = null;
+function renderGenreInside(list, fams, classified) {
+  GENRE_INSIDE = {list, fams, classified};
+  $("g-chips").innerHTML = fams.map((f, i) =>
+    `<button class="chip" type="button" data-fam="${esc(f.genre)}"
+       style="--fc:${FAM_COLOR[f.genre] || "#8b98a8"}" aria-pressed="${i === 0}">
+       <span class="dot"></span>${esc(f.genre)}
+       <span class="pct">${(100*f.plays/classified).toFixed(1)}%</span></button>`).join("");
+  $("g-chips").onclick = e => {
+    const b = e.target.closest(".chip");
+    if (!b) return;
+    for (const c of $("g-chips").children) c.setAttribute("aria-pressed", c === b);
+    drawGenreInside(b.dataset.fam);
+  };
+  drawGenreInside(fams[0].genre);
+}
+
+function drawGenreInside(family) {
+  const {list, fams, classified} = GENRE_INSIDE;
+  const fam = fams.find(f => f.genre === family);
+  const rows = list.filter(g => g.family === family);      // already biggest-first
+  const col = FAM_COLOR[family] || "#8b98a8";
+  const x = rows.map(g => 100*g.plays/fam.plays);
+  /* Shaded from the family's own colour down, so a row's depth reads as its
+     place in the family and the panel still belongs to the same key as the
+     charts above and below it. */
+  const fade = (hex, t) => {
+    const n = parseInt(hex.slice(1), 16), bg = [17, 21, 28];
+    return "#" + [16, 8, 0].map((s, i) =>
+      Math.round(bg[i] + ((n >> s & 255) - bg[i]) * t).toString(16).padStart(2, "0")).join("");
+  };
+  plot("fig-ginside", [{type:"bar", orientation:"h", x,
+    y: uniqLabels(rows.map(g => trunc(g.genre, 26))),
+    text: rows.map((g, i) => `  ${x[i].toFixed(0)}%`),
+    textposition:"outside", cliponaxis:false, textfont:{size:11.5, color:"#e6edf3"},
+    hovertext: rows.map((g, i) => `<b>${esc(g.genre)}</b><br>${x[i].toFixed(1)}% of `
+      + `${esc(family)} · ${(100*g.plays/classified).toFixed(1)}% of everything classified`
+      + `<br>${fmtN(g.plays)} plays · ${fmtN(g.artists)} artist${g.artists === 1 ? "" : "s"}`
+      + `<br>most played: ${esc(trunc(g.top.artist, 24))}`), hoverinfo:"text",
+    marker:{color: rows.map((_, i) => fade(col, 1 - 0.6*i/Math.max(rows.length-1, 1)))}}],
+    { ...baseLayout(28*rows.length + 56), bargap:0.32, margin:{l:12, r:12, t:12, b:24},
+      xaxis:{range:[0, Math.max(...x)*1.3], showgrid:false, zeroline:false,
+             showticklabels:false, fixedrange:true},
+      yaxis:{autorange:"reversed", showgrid:false, zeroline:false,
+             tickfont:{size:11.5, color:"#c9d4e0"}} });
+
+  const share = g => (100*g.plays/fam.plays).toFixed(0);
+  const named = rows.length === 1
+    ? `Everything here is tagged plainly as ${esc(rows[0].genre)}.`
+    : `Inside it, ${rows.slice(0, 3).map(g => `<b>${esc(g.genre)}</b> is ${share(g)}%`)
+        .join(", ")}${rows.length > 3 ? `, and ${fmtN(rows.length - 3)} more follow` : ""}.`;
+  $("g-in-cap").innerHTML = `Every family above is a bag of genres, and the bag can hide a lot — `
+    + `pick one to open it. <b>${esc(family)}</b> is `
+    + `${(100*fam.plays/classified).toFixed(1)}% of your classified listening across `
+    + `${fmtN(fam.artists)} artists. ${named} Bars are that genre's share of this family, not `
+    + `of your whole history.`;
 }
 
 function renderGenreBars(list, classified) {
@@ -2044,21 +2134,50 @@ function renderGenreDrift(fams) {
     text: q.map((k, i) => `<b>${esc(g.genre)}</b> — ${qLabel(k)}`
       + `<br>${(100*(g.qh[k]||0)/(qt[i]||1)).toFixed(1)}% of that quarter`
       + `<br>${fmtN(g.qh[k] || 0)} scrobbles`) })),
-    { ...baseLayout(360), margin:{l:12, r:12, t:10, b:30}, hovermode:"closest",
+    { ...baseLayout(460), margin:{l:12, r:12, t:10, b:30}, hovermode:"closest",
       xaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#8b98a8"},
              tickmode:"array", tickvals: q.filter(k => k%4 === 0).map(qLabel),
              ticktext: q.filter(k => k%4 === 0).map(k => String((k/4)|0))},
       yaxis:{showgrid:false, zeroline:false, range:[0,100], ticksuffix:"%",
              tickfont:{size:10, color:"#8b98a8"}},
-      /* Name the widest bands on the chart itself. The rest are named by the
-         panel beside this one, which is colour-matched and lists all twelve. */
+      /* Every band gets its name, placed at the quarter where that band is at
+         its thickest rather than at a fixed column. Labelling the middle quarter
+         instead left half the families anonymous and put the rest wherever their
+         band happened to be thin, which read as labels floating near the wrong
+         colour. Measured here, the narrowest family still reaches 8.3% at its
+         own best quarter, which is comfortably enough room at this height. */
       annotations: (() => {
-        const m = q.length >> 1, out = []; let base = 0;
-        for (const g of fams) {
-          const s = 100*(g.qh[q[m]] || 0)/(qt[m] || 1);
-          if (s >= 6) out.push({x: qLabel(q[m]), y: base + s/2, text: g.genre,
-            showarrow:false, font:{size:10.5, color:"#11151c"}, xanchor:"center"});
-          base += s;
+        const share = [], out = [], placed = [];
+        for (const g of fams) share.push(q.map((k,i) => 100*(g.qh[k] || 0)/(qt[i] || 1)));
+        const mid = f => {                    // centre of band f, in stacked percent
+          const b = [];
+          for (let i = 0; i < q.length; i++) {
+            let s = 0;
+            for (let k = 0; k < f; k++) s += share[k][i];
+            b.push(s + share[f][i]/2);
+          }
+          return b;
+        };
+        /* Widest-quarter alone still collided: Metal peaks at 2024 Q2 and Chill
+           & Downtempo at 2024 Q3, two points of stack apart, which overlaps at
+           this height. So each family takes the thickest quarter that does not
+           land on top of an already-placed label, biggest family choosing first.
+           A label needs roughly 4 points of vertical clearance and four columns
+           of horizontal room, hence the window below. */
+        const XWIN = 4, YGAP = 4.2;
+        for (let f = 0; f < fams.length; f++) {
+          const c = mid(f), s = share[f], best = Math.max(...s);
+          const cand = s.map((v, i) => i)
+            .filter(i => s[i] >= Math.max(3, 0.5*best))
+            .sort((a, b) => s[b] - s[a]);
+          let at = cand.find(i =>
+            !placed.some(p => Math.abs(p.i - i) <= XWIN && Math.abs(p.y - c[i]) < YGAP));
+          if (at === undefined) at = s.indexOf(best);   // rather overlap than go unnamed
+          placed.push({i: at, y: c[at]});
+          out.push({ x: qLabel(q[at]), y: c[at], text: fams[f].genre,
+            showarrow:false, font:{size:10.5, color:"#11151c"},
+            // keep the first and last columns' labels from hanging off the plot
+            xanchor: at <= 1 ? "left" : at >= q.length-2 ? "right" : "center" });
         }
         return out;
       })() });
@@ -2087,7 +2206,7 @@ function renderGenreDrift(fams) {
     hovertext: moves.map(m => `<b>${esc(m.name)}</b><br>${m.e.toFixed(1)}% of the first half`
       + `<br>${m.l.toFixed(1)}% of the second<br>${m.d >= 0 ? "gained" : "lost"} `
       + `${Math.abs(m.d).toFixed(1)} points`), hoverinfo:"text"}],
-    { ...baseLayout(360), bargap:0.32, margin:{l:12, r:12, t:10, b:30},
+    { ...baseLayout(460), bargap:0.32, margin:{l:12, r:12, t:10, b:30},
       xaxis:{showgrid:false, zeroline:true, zerolinecolor:"#3a4552", zerolinewidth:1,
              title:{text:"percentage points", font:{size:10, color:"#8b98a8"}},
              tickfont:{size:10, color:"#8b98a8"},
@@ -2229,7 +2348,7 @@ function activate(name, opts = {}) {
       // network-bound and cached across visits; a failure must not blank the tab
       renderGenres().catch(err => {
         console.warn("genre lookup failed", err);
-        clearFigs("fig-genre", "fig-gstream", "fig-gmove");
+        clearFigs("fig-genre", "fig-ginside", "fig-gstream", "fig-gmove");
         $("g-top-cap").textContent = "Genres are unavailable right now.";
       });
     }
