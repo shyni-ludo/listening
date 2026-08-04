@@ -295,6 +295,10 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap" id="a-shape-cap"></p>
       <div class="grid2"><div><h3>Flashes</h3><div id="fig-flash"></div></div>
         <div><h3>Lifers</h3><div id="fig-lifer"></div></div></div></section>
+    <section class="panel"><h2>What you actually listen to</h2>
+      <p class="cap" id="a-genre-cap"></p><div id="fig-genre"></div></section>
+    <section class="panel"><h2>How your taste moved</h2>
+      <p class="cap" id="a-gtime-cap"></p><div id="fig-gtime"></div></section>
     <section class="panel"><h2>How deep you went</h2>
       <p class="cap" id="a-depth-cap"></p><div id="fig-adepth"></div></section>
     <section class="panel"><h2>Every artist</h2>
@@ -578,10 +582,41 @@ const qLabel = q => ((q/4)|0)+" Q"+(q%4+1);
 /* ================================================================== idb cache */
 function idbOpen() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open("lfm-cache", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("users");
+    /* v2 adds the tag store. An artist's tags belong to the artist, not to the
+       visitor, so they sit in their own store and are reused by every report
+       opened in this browser. Creating stores conditionally keeps the upgrade
+       safe for a v1 database that already holds cached scrobbles. */
+    const r = indexedDB.open("lfm-cache", 2);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains("users")) db.createObjectStore("users");
+      if (!db.objectStoreNames.contains("tags")) db.createObjectStore("tags");
+    };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
+  });
+}
+/* One transaction for the whole batch — 400 separate ones is slower than the
+   network calls they exist to avoid. */
+async function idbGetMany(store, keys) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store), os = tx.objectStore(store), out = new Map();
+    for (const k of keys) {
+      const q = os.get(k);
+      q.onsuccess = () => { if (q.result !== undefined) out.set(k, q.result); };
+    }
+    tx.oncomplete = () => res(out);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbPutMany(store, entries) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, "readwrite"), os = tx.objectStore(store);
+    for (const [k, v] of entries) os.put(v, k);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
   });
 }
 async function idbGet(user) {
@@ -1474,6 +1509,13 @@ function renderArtists() {
   renderArtistShape(deep, refM);
   renderArtistDepth(all);
   renderArtistTable(all);
+  // network-bound and cached across visits — never let it hold up the rest
+  renderGenres(all).catch(err => {
+    console.warn("genre lookup failed", err);
+    clearFigs("fig-genre", "fig-gtime");
+    $("a-genre-cap").textContent = "Genres are unavailable right now.";
+    $("a-gtime-cap").textContent = "";
+  });
 }
 
 function renderArtistSpans(top) {
@@ -1637,6 +1679,232 @@ function renderArtistTable(all) {
         <td>${sparkline(S.aqHist.get(e.artist) || {}, fullQ)}</td></tr>`;
     },
     {keyFn: e => e.artist.toLowerCase(), noun: "artists", placeholder: "Search artist…"});
+}
+
+/* =================================================================== genres */
+/* last.fm has no genre field. It has tags, which are a folksonomy: alongside
+   real genres people file artists under "seen live", "favorites", "female
+   vocalists", decades, nationalities, and the artist's own name. So a tag only
+   gets to stand for what someone listens to after surviving the filter below.
+
+   Only the top GENRE_ARTISTS by plays are looked up. The tail is enormous and
+   worthless here — this account has 6,140 artists, of whom 1,935 have a single
+   play, and the top 400 already carry roughly two thirds of all listening. The
+   caption always states the coverage actually achieved rather than implying
+   the whole history was classified. */
+const GENRE_ARTISTS = 300, GENRE_MIN_TAG = 15, GENRE_CONC = 4, GENRE_SHOW = 12;
+/* last.fm asks for roughly five requests a second, and the key this project
+   used before is already suspended at their end, so the fan-out is gated
+   rather than run flat out. It costs about a minute on a completely cold
+   cache and essentially nothing afterwards: results are kept per browser in
+   IndexedDB, and the worker has the edge cache them for a month, so the
+   second visitor to need a given artist pays nothing at all. */
+const GENRE_SPACING = 210;
+let tagGate = 0;
+async function tagSlot() {
+  const now = Date.now(), at = Math.max(now, tagGate);
+  tagGate = at + GENRE_SPACING;
+  if (at > now) await sleep(at - now);
+}
+const GENRE_JUNK = new Set([
+  "seen live","favorites","favourites","favorite","favourite","favorite songs",
+  "my favorites","my favourites","loved","love","love it","awesome","amazing",
+  "beautiful","cool","epic","good","great","best","masterpiece","perfect","nice",
+  "music","musica","song","songs","album","albums","artist","artists","band","bands",
+  "female vocalists","male vocalists","female vocalist","male vocalist","female",
+  "male","vocalist","vocalists","singer","singers","duo","solo","composer",
+  "usa","american","america","british","uk","england","german","germany","japanese",
+  "japan","swedish","sweden","canadian","canada","australian","australia","french",
+  "france","russian","russia","norwegian","norway","finnish","finland","italian",
+  "italy","spanish","spain","dutch","netherlands","polish","poland","korean","korea",
+  "chinese","china","brazilian","brazil","irish","ireland","scottish","danish",
+  "spotify","itunes","youtube","soundcloud","mp3","vinyl","radio","playlist",
+  "heard on pandora","check out","to check out","want to see","wish i could see",
+]);
+/* decades, listener-count tags, and personal filing that always starts the same */
+const GENRE_JUNK_RE = /^((19|20)?\d0s)$|^under \d|^my |^i |favou?rite|^discovered|^tagged|^\d+$|^best of|^top \d|listeners$/;
+
+function primaryGenre(tags, artist) {
+  if (!tags) return null;
+  const self = artist.toLowerCase().trim();
+  for (const [name, count] of tags) {          // last.fm returns these top-first
+    if (count < GENRE_MIN_TAG) continue;
+    const n = String(name).toLowerCase().trim();
+    if (!n || n === self || GENRE_JUNK.has(n) || GENRE_JUNK_RE.test(n)) continue;
+    return n;
+  }
+  return null;
+}
+/* Capitalise across hyphens, so hip-hop and lo-fi read right, but leave the
+   joining words alone so it is "Drum and Bass" rather than "Drum And Bass". */
+const TITLE_SKIP = new Set(["and","of","the","a","an","in","on","to","for","vs","n"]);
+const titleCase = s => s.replace(/\b[a-z][a-z'’]*/g, (w, off) =>
+  off > 0 && TITLE_SKIP.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1));
+
+async function tagFetch(artist, key) {
+  const p = new URLSearchParams({method:"artist.getTopTags", artist,
+                                 autocorrect:"1", format:"json"});
+  if (key) p.set("api_key", key);
+  const base = (PROXY && !key) ? PROXY : API;
+  const sep = base.includes("?") ? "&" : "?";
+  const r = await fetch(base + sep + p);
+  const d = await r.json();
+  if (!d || d.error) return null;      // proxy refusing the method, or a last.fm error
+  let t = (d.toptags && d.toptags.tag) || [];
+  if (!Array.isArray(t)) t = [t];      // a single tag comes back unwrapped
+  return t.map(x => [String(x.name), +x.count || 0]);
+}
+
+let genreRun = 0;    // bumped on every load, so a stale fetch can't paint
+async function loadGenres(want, onProgress) {
+  const mine = ++genreRun;
+  const key = getKey();
+  const got = await idbGetMany("tags", want).catch(() => new Map());
+  const missing = want.filter(a => !got.has(a));
+  const fresh = [];
+  let done = want.length - missing.length, failures = 0, i = 0;
+  onProgress(done, want.length);
+
+  const pump = async () => {
+    while (i < missing.length) {
+      if (genreRun !== mine) return;
+      const a = missing[i++];
+      await tagSlot();
+      const t = await tagFetch(a, key).catch(() => null);
+      if (t === null) {
+        /* Nothing has worked yet and several tries have failed — almost always
+           the proxy refusing artist.getTopTags. Stop rather than fire 400
+           requests at a wall. */
+        if (++failures >= 5 && !got.size) return;
+      } else {
+        got.set(a, t); fresh.push([a, t]);
+      }
+      onProgress(++done, want.length);
+    }
+  };
+  await Promise.all(Array.from({length: GENRE_CONC}, pump));
+  if (genreRun !== mine) return null;
+  if (fresh.length) idbPutMany("tags", fresh).catch(() => {});
+  return got.size ? got : null;
+}
+
+async function renderGenres(all) {
+  const want = all.slice(0, GENRE_ARTISTS).map(e => e.artist);
+  const note = m => { $("a-genre-cap").textContent = m; $("a-gtime-cap").textContent = ""; };
+  note("Looking up genres…");
+  const tags = await loadGenres(want, (d, t) =>
+    note(`Looking up genres… ${fmtN(d)} / ${fmtN(t)} artists`));
+  if (!tags) {
+    clearFigs("fig-genre", "fig-gtime");
+    note("Genres are unavailable right now — last.fm's tag lookup could not be reached.");
+    return;
+  }
+
+  const genreOf = new Map();                    // artist -> genre
+  let tagged = 0, taggedPlays = 0;
+  for (const e of all.slice(0, GENRE_ARTISTS)) {
+    const g = primaryGenre(tags.get(e.artist), e.artist);
+    if (g) { genreOf.set(e.artist, g); tagged++; taggedPlays += e.plays; }
+  }
+  if (!genreOf.size) {
+    clearFigs("fig-genre", "fig-gtime");
+    note("No usable genre tags came back for your artists.");
+    return;
+  }
+
+  const byGenre = new Map();                    // genre -> [plays, artists]
+  for (const e of all) {
+    const g = genreOf.get(e.artist);
+    if (!g) continue;
+    const v = byGenre.get(g) || [0, 0];
+    v[0] += e.plays; v[1]++;
+    byGenre.set(g, v);
+  }
+  const top = [...byGenre.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, GENRE_SHOW);
+  const x = top.map(([, v]) => 100*v[0]/taggedPlays);
+  plot("fig-genre", [{type:"bar", orientation:"h", x,
+    y: uniqLabels(top.map(([g]) => titleCase(trunc(g, 26)))),
+    text: top.map((_, i) => `  ${x[i].toFixed(1)}%`),
+    hovertext: top.map(([g, v], i) => `<b>${esc(titleCase(g))}</b><br>${fmtN(v[0])} plays `
+      + `(${x[i].toFixed(1)}% of everything classified)<br>${fmtN(v[1])} artist${v[1] === 1 ? "" : "s"}`),
+    hoverinfo:"text", textposition:"outside", cliponaxis:false,
+    textfont:{size:11.5, color:"#e6edf3"},
+    marker:{color: top.map((_, i) => PALETTE[i % PALETTE.length])}}],
+    { ...baseLayout(26*top.length + 62), bargap:0.34, margin:{l:12, r:12, t:14, b:24},
+      xaxis:{range:[0, Math.max(...x)*1.5], showgrid:false, zeroline:false,
+             showticklabels:false, fixedrange:true},
+      yaxis:{autorange:"reversed", showgrid:false, zeroline:false,
+             tickfont:{size:11.5, color:"#c9d4e0"}} });
+
+  $("a-genre-cap").innerHTML = `Each artist counted once, under the tag last.fm's listeners agree `
+    + `on most, with the folksonomy noise ("seen live", "favorites", decades, nationalities) `
+    + `stripped out. Based on your top <b>${fmtN(tagged)}</b> artists — `
+    + `<b>${(100*taggedPlays/S.total).toFixed(0)}%</b> of everything you've played. `
+    + `The long tail is not classified: looking up all ${fmtN(all.length)} artists would cost `
+    + `${fmtN(all.length)} requests to move the answer by a few percent.`;
+
+  renderGenreTime(genreOf, top.map(([g]) => g));
+}
+
+function renderGenreTime(genreOf, order) {
+  /* Share by year, not by quarter: quarterly shares on six years of data are
+     noise you have to squint through, and the question here is drift. */
+  const years = new Map();                      // year -> genre -> plays
+  for (const [artist, g] of genreOf) {
+    const qh = S.aqHist.get(artist) || {};
+    for (const [q, n] of Object.entries(qh)) {
+      const y = (q/4)|0;
+      if (!years.has(y)) years.set(y, new Map());
+      const m = years.get(y);
+      m.set(g, (m.get(g) || 0) + n);
+    }
+  }
+  const ys = [...years.keys()].sort((a, b) => a-b);
+  if (ys.length < 2) { clearFigs("fig-gtime");
+    $("a-gtime-cap").textContent = "A couple of years of history are needed before drift shows up.";
+    return; }
+
+  const keep = order.slice(0, 6);
+  const rows = keep.concat(["other"]);
+  const totals = ys.map(y => [...years.get(y).values()].reduce((a, b) => a+b, 0) || 1);
+  const traces = rows.map((g, gi) => {
+    const share = ys.map((y, i) => {
+      const m = years.get(y);
+      const n = g === "other"
+        ? [...m.entries()].filter(([k]) => !keep.includes(k)).reduce((a, [, v]) => a+v, 0)
+        : (m.get(g) || 0);
+      return 100*n/totals[i];
+    });
+    return {type:"bar", name: g === "other" ? "everything else" : titleCase(g), x: ys.map(String),
+      y: share, marker:{color: g === "other" ? "#3d4658" : PALETTE[gi % PALETTE.length]},
+      hovertext: share.map((v, i) => `<b>${g === "other" ? "Everything else" : esc(titleCase(g))}</b>`
+        + ` — ${ys[i]}<br>${v.toFixed(1)}% of that year's classified plays`),
+      hoverinfo:"text"};
+  });
+  plot("fig-gtime", traces, { ...baseLayout(400), barmode:"stack", bargap:0.32,
+    showlegend:true, margin:{l:12, r:12, t:52, b:30},
+    legend:{orientation:"h", y:1.1, x:0, font:{size:11, color:"#8b98a8"}},
+    xaxis:{showgrid:false, zeroline:false, tickfont:{size:11.5, color:"#8b98a8"}},
+    yaxis:{ticksuffix:"%", range:[0, 100], showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}} });
+
+  // biggest mover between the first and last year that has real data
+  const first = ys[0], last = ys[ys.length-1];
+  const shareIn = (y, g) => {
+    const m = years.get(y), t = [...m.values()].reduce((a, b) => a+b, 0) || 1;
+    return 100*(m.get(g) || 0)/t;
+  };
+  let up = null, down = null;
+  for (const g of keep) {
+    const d = shareIn(last, g) - shareIn(first, g);
+    if (!up || d > up[1]) up = [g, d];
+    if (!down || d < down[1]) down = [g, d];
+  }
+  $("a-gtime-cap").innerHTML = `The same classification, split by year — each bar is one year's `
+    + `listening, so the question is what share, not how much. Between ${first} and ${last}, `
+    + `<b>${esc(titleCase(up[0]))}</b> ${up[1] >= 0 ? "rose" : "fell"} `
+    + `${Math.abs(up[1]).toFixed(0)} points and <b>${esc(titleCase(down[0]))}</b> `
+    + `${down[1] >= 0 ? "rose" : "fell"} ${Math.abs(down[1]).toFixed(0)}.`;
 }
 
 /* --------------------------------------------------------- table machinery */
