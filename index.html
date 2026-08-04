@@ -171,7 +171,8 @@ tbody tr.extra.revealed { display:table-row; }
   .grid3 { grid-template-columns:minmax(0,1fr); gap:4px; }
   .grid3 h3 { margin-top:12px; }
   /* 11-column score tables scroll sideways instead of being crushed */
-  #f-table, #e-table { overflow-x:auto; }
+  #f-table, #e-table, #fig-bump { overflow-x:auto; }
+  #fig-bump .plot-container { min-width:560px; }
   #f-table table, #e-table table { min-width:620px; }
   .tbl-controls { flex-wrap:wrap; }
   .search { min-width:100%; }
@@ -261,8 +262,7 @@ tbody tr.extra.revealed { display:table-row; }
         The dotted line marks half of everything you've ever played.</p>
       <div id="fig-conc"></div></section>
     <section class="panel"><h2>Your rotating obsessions</h2>
-      <p class="cap">Quarterly top-10 leaderboard — who was on top, and when.
-        Hover a line to follow one artist; big dots mark a #1 quarter.</p>
+      <p class="cap" id="bump-cap"></p>
       <div id="fig-bump"></div></section>
     <section class="panel"><h2>How the leaderboard was built</h2>
       <p class="cap">Cumulative scrobbles for your all-time top 8 artists.</p>
@@ -700,7 +700,7 @@ function renderOverview(user) {
     // three divs, one render: on mobile they stack, so all three need reserving
     ["fig-top-a fig-top-t fig-top-al", 460,                         renderTopCharts],
     ["fig-conc",        360,                                        renderConcentration],
-    ["fig-bump",        420,                                        () => renderBump(topA)],
+    ["fig-bump",        470,                                        renderBump],
     ["fig-cum",         400,                                        () => renderCumulative(topA)],
     ["fig-disc",        340,                                        renderDiscovery],
     ["fig-newshare",    340,                                        renderNewShare],
@@ -962,63 +962,105 @@ function renderTopCharts() {
   }
 }
 
-function renderBump(topA) {
-  const top10 = topA.slice(0,10).map(e=>e[0]);
-  const qset = new Set();
-  for (const k of S.monthCounts.keys()) qset.add(qKey(new Date(((k/12)|0), k%12, 1)));
-  const qs = [...qset].sort((a,b)=>a-b);
-  const counts = new Map(); // quarter -> Map(artist -> n)
-  for (const q of qs) counts.set(q, new Map(top10.map(a=>[a,0])));
-  for (const [k, e] of S.bySong) {
-    if (!top10.includes(e.artist)) continue;
-    for (const [q, n] of Object.entries(S.qHistMap.get(k) || {})) {
-      const m = counts.get(+q); if (m) m.set(e.artist, m.get(e.artist) + n);
-    }
-  }
-  const nq = qs.length;
-  const traces = top10.map((a, j) => {
-    const ranks = qs.map(q => {
-      const m = counts.get(q);
-      return 1 + top10.filter(o => m.get(o) > m.get(a) || (m.get(o) === m.get(a) && o < a)).length;
-    });
-    const text = qs.map((q,i) => `${a}<br>${qLabel(q)} – rank #${ranks[i]} (${fmtN(counts.get(q).get(a))} scrobbles)`);
-    return {type:"scatter", x:[...Array(nq).keys()], y:ranks, mode:"lines+markers",
-            line:{color:PALETTE[j], width:2.5, shape:"spline", smoothing:0.8},
-            // halo so crossings read as over/under; #1 gets a bigger dot
-            marker:{size:ranks.map(r => r === 1 ? 11 : 7), color:PALETTE[j],
-                    line:{color:"#161b22", width:2}},
-            hoverinfo:"text", text};
-  });
-  const anns = top10.map((a,j) => ({
-    x:nq-1+0.35, y:traces[j].y[nq-1], text:esc(trunc(a,18)), showarrow:false, xanchor:"left",
-    font:{size:11, color:PALETTE[j]} }));
-  const tq1 = qs.map((q,i)=>[q,i]).filter(([q]) => q%4===0);
-  plot("fig-bump", traces, { ...baseLayout(420), annotations:anns, hovermode:"closest",
-    xaxis:{tickmode:"array", tickvals:tq1.map(e=>e[1]), ticktext:tq1.map(e=>String((e[0]/4)|0)),
-           range:[-0.6, nq+3.2], tickfont:{size:11, color:"#8b98a8"}, showgrid:false, zeroline:false},
-    yaxis:{autorange:"reversed", dtick:1, range:[10.6,0.4], tickvals:[1,2,3,4,5,6,7,8,9,10],
-           showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}} });
-  isolateOnHover($("fig-bump"), top10.length);
-}
+/* This was a bump chart until the data argued against it. Ranking each of the
+   all-time top 10 against only each other gave every one of them a rank in
+   quarters where they had zero plays, so ten lines spanned the full width no
+   matter when the artist was actually discovered — 190 segments and 259
+   crossings. Ranking honestly, against every artist, showed why no line chart
+   works here: 40 different artists reach a quarterly top 3 and the top 10 holds
+   together for only 29 consecutive-quarter segments. There is no arc to follow.
 
-/* Ten crossing lines are unreadable at rest — hovering one fades the other
-   nine (and their end labels) so a single artist's arc can be followed. */
-function isolateOnHover(gd, n) {
-  const idx = [...Array(n).keys()];
-  let cur;                                  // skip redundant redraws while
-  const focus = ci => {                     // the pointer tracks one line
-    if (ci === cur) return;
-    cur = ci;
-    const lit = i => ci === null || i === ci;
-    Plotly.restyle(gd, {opacity: idx.map(i => lit(i) ? 1 : 0.12),
-                        "line.width": idx.map(i => i === ci ? 4 : 2.5)});
-    Plotly.relayout(gd, Object.fromEntries(
-      idx.map(i => [`annotations[${i}].opacity`, lit(i) ? 1 : 0.15])));
+   A grid says the same thing without pretending otherwise: one row per artist
+   who has ever topped a quarter, ordered by when they first did, so obsessions
+   arriving and burning out fall out as a staircase. */
+const BOARD_N = 10, BUMP_ROWS_MAX = 20;
+function renderBump() {
+  const byArtistQ = new Map();                 // artist -> quarter -> plays
+  for (const [k, e] of S.bySong) {
+    let m = byArtistQ.get(e.artist);
+    if (!m) { m = new Map(); byArtistQ.set(e.artist, m); }
+    for (const [q, n] of Object.entries(S.qHistMap.get(k) || {}))
+      m.set(+q, (m.get(+q) || 0) + n);
+  }
+  const qs = [...new Set([...S.monthCounts.keys()]
+    .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b) => a-b);
+
+  const board = new Map();                     // quarter -> that quarter's top N
+  for (const q of qs) {
+    const row = [];
+    for (const [a, m] of byArtistQ) { const n = m.get(q); if (n) row.push([a, n]); }
+    row.sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
+    board.set(q, row.slice(0, BOARD_N));
+  }
+  const rank = (q, a) => {
+    const i = board.get(q).findIndex(e => e[0] === a);
+    return i < 0 ? null : i + 1;
   };
-  gd.removeAllListeners?.("plotly_hover");   // load() can rebuild this plot
-  gd.removeAllListeners?.("plotly_unhover");
-  gd.on("plotly_hover", d => focus(d.points[0].curveNumber));
-  gd.on("plotly_unhover", () => focus(null));
+
+  const firstTop = new Map();                  // artist -> first quarter on top
+  for (const q of qs) {
+    const w = board.get(q)[0];
+    if (w && !firstTop.has(w[0])) firstTop.set(w[0], q);
+  }
+  let names = [...firstTop.keys()].sort((a, b) => firstTop.get(a) - firstTop.get(b));
+  const total = names.length;
+  if (total > BUMP_ROWS_MAX) names = names.slice(total - BUMP_ROWS_MAX);  // keep recent
+
+  if (!names.length) {
+    clearFigs("fig-bump");
+    $("bump-cap").textContent = "Not enough history yet for a quarterly leaderboard.";
+    return;
+  }
+
+  const rows = [...names].reverse();           // Plotly stacks y from the bottom
+  // zmin below the real floor so even a #10 cell keeps enough colour to read
+  const z = rows.map(a => qs.map(q => {
+    const r = rank(q, a); return r === null ? null : BOARD_N + 1 - r; }));
+  const hov = rows.map(a => qs.map(q => {
+    const r = rank(q, a);
+    return r === null
+      ? `${a}<br>${qLabel(q)} – outside the top ${BOARD_N}`
+      : `${a}<br>${qLabel(q)} – #${r} of ${BOARD_N} (${fmtN(byArtistQ.get(a).get(q))} scrobbles)`;
+  }));
+
+  // the rank inside each filled cell, dark on the bright end and light on the dark
+  const anns = [];
+  rows.forEach((a, ri) => qs.forEach((q, qi) => {
+    const r = rank(q, a);
+    if (r === null) return;
+    anns.push({x:qi, y:ri, text:String(r), showarrow:false,
+               font:{size:10.5, color: r <= 3 ? "#2a1420" : "#efe2d8",
+                     family:FONT.family}});
+  }));
+
+  const tq1 = qs.map((q, i) => [q, i]).filter(([q]) => q % 4 === 0);
+  // Year boundaries, drawn between cells rather than through them — without
+  // these a lone cell in the middle is impossible to place in time.
+  const marks = tq1.map(([, i]) => ({
+    type:"line", x0:i-0.5, x1:i-0.5, yref:"paper", y0:0, y1:1,
+    line:{color:"rgba(130,150,175,0.22)", width:1}, layer:"below"}));
+  const height = Math.min(470, Math.max(220, 30*rows.length + 110));
+  plot("fig-bump", [{
+    type:"heatmap", z, text:hov, hoverinfo:"text",
+    x:[...Array(qs.length).keys()], y:rows,
+    colorscale:WARM, zmin:-2, zmax:BOARD_N, xgap:2, ygap:2, showscale:false,
+  }], { ...baseLayout(height), annotations:anns, shapes:marks,
+    margin:{l:12, r:12, t:24, b:10},
+    xaxis:{tickmode:"array", tickvals:tq1.map(e => e[1]),
+           ticktext:tq1.map(e => String((e[0]/4)|0)), range:[-0.5, qs.length-0.5],
+           tickfont:{size:11, color:"#8b98a8"}, showgrid:false, zeroline:false},
+    yaxis:{showgrid:false, zeroline:false, automargin:true,
+           tickfont:{size:11, color:"#c9d4e0"}} });
+
+  const ones = new Set(qs.map(q => board.get(q)[0] && board.get(q)[0][0]).filter(Boolean));
+  const plural = (n, w) => `${fmtN(n)} ${w}${n === 1 ? "" : "s"}`;
+  $("bump-cap").innerHTML =
+    `Each row is an artist who has topped at least one quarter, in the order they first did — `
+    + `so a new obsession starts a new row. Colour and number are that quarter's rank; `
+    + `blank means they were outside the quarter's top ${BOARD_N}. `
+    + `<b>${plural(ones.size, "artist")}</b> ${ones.size === 1 ? "has" : "have"} been your #1 `
+    + `across ${plural(qs.length, "quarter")}`
+    + (total > names.length ? `, showing the ${BUMP_ROWS_MAX} most recent.` : ".");
 }
 
 function renderCumulative(topA) {
