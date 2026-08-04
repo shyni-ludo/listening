@@ -2130,23 +2130,34 @@ function renderGenreDrift(fams) {
     return;
   }
 
-  /* Bands stack biggest at the bottom, and the legend is in that same order, so
-     it doubles as the ranking. Naming bands in place was tried and abandoned: it
-     only works when every band is thick somewhere, which is true of some
-     accounts and not others — a lopsided library leaves half the families too
-     thin to hold text and the labels pile up along the top edge. A legend does
-     not care how the listening is distributed. */
-  const fTot = fams.reduce((a, g) => a + g.plays, 0) || 1;
+  /* Naming bands in place was tried and abandoned: it only works when every band
+     is thick somewhere, which is true of some accounts and not others — a
+     lopsided library leaves half the families too thin to hold text and the
+     labels pile up along the top edge. A legend does not care how the listening
+     is distributed. It carries names only: any percentage next to a family here
+     would be read as its overall share, and the number that matches this
+     ordering is not that.
+
+     Ordered by size in the opening quarter rather than by lifetime plays.
+     Sorting on the total made the left edge look arbitrary — Chill & Downtempo
+     is the third biggest family overall but starts smaller than Metal, so the
+     stack opened visibly out of order and therefore read as unordered
+     everywhere. Ranking on the first column instead means the chart opens as a
+     clean descent and everything after it is movement. Measured here, only the
+     single opening quarter sorts that column without inversions; widening the
+     window to a year puts three back. Ties fall back to lifetime plays, for
+     accounts whose first quarter is too sparse to separate everything. */
+  const opener = g => (g.qh[q[0]] || 0);
+  const band = [...fams].sort((a, b) => (opener(b) - opener(a)) || (b.plays - a.plays));
   /* A twelve-entry horizontal legend packs into three rows across a full-width
      panel and into twelve on a phone, where every entry claims its own line.
      Measured: 67px of legend at 1112px wide against 238px at 303px. Buy the
      extra height rather than let the legend eat the chart — at 500px tall a
      phone was left with 218px of actual plot. */
   const wide = ($("fig-gstream").clientWidth || 900) >= 700;
-  plot("fig-gstream", fams.map(g => ({          // first trace is the bottom band
+  plot("fig-gstream", band.map(g => ({          // first trace is the bottom band
     type:"scatter", mode:"none", stackgroup:"one", groupnorm:"percent",
-    name: `${g.genre} · ${(100*g.plays/fTot).toFixed(1)}%`,
-    x: q.map(qLabel), y: q.map(k => g.qh[k] || 0),
+    name: g.genre, x: q.map(qLabel), y: q.map(k => g.qh[k] || 0),
     fillcolor: FAM_COLOR[g.genre] || "#8b98a8", hoverinfo:"text",
     text: q.map((k, i) => `<b>${esc(g.genre)}</b> — ${qLabel(k)}`
       + `<br>${(100*(g.qh[k]||0)/(qt[i]||1)).toFixed(1)}% of that quarter`
@@ -2201,8 +2212,9 @@ function renderGenreDrift(fams) {
   const at = q[cut];
   $("g-time-cap").innerHTML = `Twelve families, and every classified play sits in exactly one — `
     + `nothing is bucketed as "other" because nothing is left over. Above, the thickness of a band `
-    + `is that family's share of the quarter, stacked biggest at the bottom — the legend runs in `
-    + `that same order, so it doubles as your ranking. Below, each family's share of your first `
+    + `is that family's share of the quarter, stacked in the order they started — whichever family `
+    + `was the biggest slice of <b>${qLabel(q[0])}</b> sits at the bottom, so the chart opens as a `
+    + `clean ranking and everything after it is movement. Below, each family's share of your first `
     + `${fmtN(eN)} classified plays against your most recent ${fmtN(lN)}, split at `
     + `<b>${qLabel(at)}</b>. <b>${esc(up.name)}</b> gained ${up.d.toFixed(1)} points and `
     + `<b>${esc(down.name)}</b> lost ${Math.abs(down.d).toFixed(1)}.`;
