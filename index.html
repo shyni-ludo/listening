@@ -247,6 +247,9 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap">The same clock, one panel per year. Each year is scaled to its own
         busiest hour, so the shape stays comparable even when you listened far more or less.</p>
       <div class="gridy" id="fig-clock-years"></div></section>
+    <section class="panel"><h2>Your year, on repeat</h2>
+      <p class="cap" id="season-cap"></p>
+      <div id="fig-season"></div></section>
     <section class="panel"><h2>The long run</h2>
       <p class="cap">Monthly scrobbles with a 3-month rolling average.</p>
       <div id="fig-vol"></div></section>
@@ -696,11 +699,12 @@ function renderOverview(user) {
     ["fig-cal",         150 * nCalYears,                            renderCalendar],
     ["fig-clock",       330,                                        renderClock],
     ["fig-clock-years", 198 * Math.ceil(S.heatYear.size/clockCols), renderClockYears],
+    ["fig-season",      320,                                        renderSeason],
     ["fig-vol",         330,                                        renderVolume],
     // three divs, one render: on mobile they stack, so all three need reserving
     ["fig-top-a fig-top-t fig-top-al", 460,                         renderTopCharts],
     ["fig-conc",        360,                                        renderConcentration],
-    ["fig-bump",        470,                                        renderBump],
+    ["fig-bump",        590,                                        renderBump],
     ["fig-cum",         400,                                        () => renderCumulative(topA)],
     ["fig-disc",        340,                                        renderDiscovery],
     ["fig-newshare",    340,                                        renderNewShare],
@@ -962,18 +966,19 @@ function renderTopCharts() {
   }
 }
 
-/* This was a bump chart until the data argued against it. Ranking each of the
-   all-time top 10 against only each other gave every one of them a rank in
-   quarters where they had zero plays, so ten lines spanned the full width no
-   matter when the artist was actually discovered — 190 segments and 259
-   crossings. Ranking honestly, against every artist, showed why no line chart
-   works here: 40 different artists reach a quarterly top 3 and the top 10 holds
-   together for only 29 consecutive-quarter segments. There is no arc to follow.
+/* Two rewrites, both driven by what the data actually says.
 
-   A grid says the same thing without pretending otherwise: one row per artist
-   who has ever topped a quarter, ordered by when they first did, so obsessions
-   arriving and burning out fall out as a staircase. */
-const BOARD_N = 10, BUMP_ROWS_MAX = 20;
+   It began as a bump chart that ranked the all-time top 10 against only each
+   other, so every one of them held a rank in quarters where they had zero
+   plays: 190 segments, 259 crossings, and lines for artists not yet
+   discovered. Ranking honestly killed the line chart too - 40 artists reach a
+   quarterly top 3, and the top 10 survives two quarters running only 29 times.
+
+   A rank grid replaced it and was still unreadable: rank is an inverted
+   abstract scale, so every cell had to be decoded. The measurement that
+   settled it is that a #1 artist is a median 5.2% of their own quarter.
+   Nothing dominates, so there is no magnitude worth shading - the whole story
+   is that the name keeps changing. So the chart says the names. */
 function renderBump() {
   const byArtistQ = new Map();                 // artist -> quarter -> plays
   for (const [k, e] of S.bySong) {
@@ -982,85 +987,169 @@ function renderBump() {
     for (const [q, n] of Object.entries(S.qHistMap.get(k) || {}))
       m.set(+q, (m.get(+q) || 0) + n);
   }
-  const qs = [...new Set([...S.monthCounts.keys()]
-    .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b) => a-b);
+  const qTotal = new Map();
+  for (const m of byArtistQ.values())
+    for (const [q, n] of m) qTotal.set(q, (qTotal.get(q) || 0) + n);
 
-  const board = new Map();                     // quarter -> that quarter's top N
-  for (const q of qs) {
-    const row = [];
-    for (const [a, m] of byArtistQ) { const n = m.get(q); if (n) row.push([a, n]); }
-    row.sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
-    board.set(q, row.slice(0, BOARD_N));
-  }
-  const rank = (q, a) => {
-    const i = board.get(q).findIndex(e => e[0] === a);
-    return i < 0 ? null : i + 1;
+  const QUARTERS = 20;   // five years; also what BUMP_H below reserves
+  const all = [...qTotal.keys()].sort((a, b) => b - a);
+  const qs = all.slice(0, QUARTERS);                                // newest first
+  const winner = q => {
+    let best = null, bn = 0;
+    for (const [a, m] of byArtistQ) {
+      const n = m.get(q) || 0;
+      if (n > bn || (n === bn && best !== null && n > 0 && a < best)) { best = a; bn = n; }
+    }
+    return bn > 0 ? [best, bn] : null;
   };
+  const reign = qs.map(q => [q, winner(q)]).filter(([, w]) => w);
 
-  const firstTop = new Map();                  // artist -> first quarter on top
-  for (const q of qs) {
-    const w = board.get(q)[0];
-    if (w && !firstTop.has(w[0])) firstTop.set(w[0], q);
-  }
-  let names = [...firstTop.keys()].sort((a, b) => firstTop.get(a) - firstTop.get(b));
-  const total = names.length;
-  if (total > BUMP_ROWS_MAX) names = names.slice(total - BUMP_ROWS_MAX);  // keep recent
-
-  if (!names.length) {
+  if (!reign.length) {
     clearFigs("fig-bump");
     $("bump-cap").textContent = "Not enough history yet for a quarterly leaderboard.";
     return;
   }
 
-  const rows = [...names].reverse();           // Plotly stacks y from the bottom
-  // zmin below the real floor so even a #10 cell keeps enough colour to read
-  const z = rows.map(a => qs.map(q => {
-    const r = rank(q, a); return r === null ? null : BOARD_N + 1 - r; }));
-  const hov = rows.map(a => qs.map(q => {
-    const r = rank(q, a);
-    return r === null
-      ? `${a}<br>${qLabel(q)} – outside the top ${BOARD_N}`
-      : `${a}<br>${qLabel(q)} – #${r} of ${BOARD_N} (${fmtN(byArtistQ.get(a).get(q))} scrobbles)`;
-  }));
+  // An artist who comes back deserves to be recognisable; a one-quarter phase
+  // does not need its own colour, and 40 of them would exhaust any palette.
+  const times = new Map();
+  for (const [, [a]] of reign) times.set(a, (times.get(a) || 0) + 1);
+  const repeats = [...times.entries()].filter(([, n]) => n > 1)
+    .sort((x, y) => y[1] - x[1]).map(([a]) => a);
+  const hue = new Map(repeats.map((a, i) => [a, PALETTE[i % PALETTE.length]]));
+  const ONCE = "#46566b";
 
-  // the rank inside each filled cell, dark on the bright end and light on the dark
-  const anns = [];
-  rows.forEach((a, ri) => qs.forEach((q, qi) => {
-    const r = rank(q, a);
-    if (r === null) return;
-    anns.push({x:qi, y:ri, text:String(r), showarrow:false,
-               font:{size:10.5, color: r <= 3 ? "#2a1420" : "#efe2d8",
-                     family:FONT.family}});
-  }));
+  const y = reign.map(([q]) => qLabel(q));
+  const share = reign.map(([q, [, n]]) => 100 * n / qTotal.get(q));
+  const label = reign.map(([, [a]], i) => `  ${esc(trunc(a, 26))}   ${share[i].toFixed(1)}%`);
+  const hover = reign.map(([q, [a, n]], i) =>
+    `<b>${esc(a)}</b> topped ${qLabel(q)}<br>${fmtN(n)} of ${fmtN(qTotal.get(q))} scrobbles `
+    + `(${share[i].toFixed(1)}%)<br>` + (times.get(a) > 1
+        ? `your #1 in ${times.get(a)} different quarters` : "their only quarter on top"));
 
-  const tq1 = qs.map((q, i) => [q, i]).filter(([q]) => q % 4 === 0);
-  // Year boundaries, drawn between cells rather than through them — without
-  // these a lone cell in the middle is impossible to place in time.
-  const marks = tq1.map(([, i]) => ({
-    type:"line", x0:i-0.5, x1:i-0.5, yref:"paper", y0:0, y1:1,
-    line:{color:"rgba(130,150,175,0.22)", width:1}, layer:"below"}));
-  const height = Math.min(470, Math.max(220, 30*rows.length + 110));
   plot("fig-bump", [{
-    type:"heatmap", z, text:hov, hoverinfo:"text",
-    x:[...Array(qs.length).keys()], y:rows,
-    colorscale:WARM, zmin:-2, zmax:BOARD_N, xgap:2, ygap:2, showscale:false,
-  }], { ...baseLayout(height), annotations:anns, shapes:marks,
-    margin:{l:12, r:12, t:24, b:10},
-    xaxis:{tickmode:"array", tickvals:tq1.map(e => e[1]),
-           ticktext:tq1.map(e => String((e[0]/4)|0)), range:[-0.5, qs.length-0.5],
-           tickfont:{size:11, color:"#8b98a8"}, showgrid:false, zeroline:false},
-    yaxis:{showgrid:false, zeroline:false, automargin:true,
-           tickfont:{size:11, color:"#c9d4e0"}} });
+    type:"bar", orientation:"h", x:share, y, text:label, hovertext:hover,
+    hoverinfo:"text", textposition:"outside", cliponaxis:false,
+    textfont:{size:12, color:"#e6edf3"},
+    marker:{color: reign.map(([, [a]]) => hue.get(a) || ONCE)},
+  }], { ...baseLayout(Math.max(240, 26*reign.length + 70)),   // 590 at QUARTERS
+    bargap:0.35, margin:{l:12, r:12, t:16, b:28},
+    xaxis:{range:[0, Math.max(...share) * 2.9], showgrid:false, zeroline:false,
+           showticklabels:false, fixedrange:true},
+    yaxis:{autorange:"reversed", showgrid:false, zeroline:false, automargin:true,
+           tickfont:{size:11, color:"#8b98a8"}} });
 
-  const ones = new Set(qs.map(q => board.get(q)[0] && board.get(q)[0][0]).filter(Boolean));
-  const plural = (n, w) => `${fmtN(n)} ${w}${n === 1 ? "" : "s"}`;
+  const med = [...share].sort((a, b) => a - b)[share.length >> 1];
   $("bump-cap").innerHTML =
-    `Each row is an artist who has topped at least one quarter, in the order they first did — `
-    + `so a new obsession starts a new row. Colour and number are that quarter's rank; `
-    + `blank means they were outside the quarter's top ${BOARD_N}. `
-    + `<b>${plural(ones.size, "artist")}</b> ${ones.size === 1 ? "has" : "have"} been your #1 `
-    + `across ${plural(qs.length, "quarter")}`
-    + (total > names.length ? `, showing the ${BUMP_ROWS_MAX} most recent.` : ".");
+    `Who your most-played artist was in each quarter, and how much of that quarter they were. `
+    + `<b>${fmtN(times.size)} different artists</b> across `
+    + (all.length > qs.length ? `the last ${fmtN(reign.length)} quarters` : `${fmtN(reign.length)} quarters`) + ` — `
+    + `<b style="color:${PALETTE[0]}">coloured</b> ones came back, grey ones had a single `
+    + `quarter on top. Even a #1 is typically only ${med.toFixed(1)}% of what you played, `
+    + `so these are phases, not obsessions.`;
+}
+
+/* Seasonality has to be measured against each year's own baseline, not pooled.
+   This account fell from 137 scrobbles a day in 2022 to 30 in 2026, and pooling
+   lets that trend masquerade as a season: October looked like the third busiest
+   month at 107 a day purely because October has no 2026 in it yet, when against
+   its own years it is a below-average month (0.93x). Pooling also moved the
+   quietest month from June to July and shrank the swing from 1.58x to 1.37x.
+
+   So each month is scored against the year it happened in, and those ratios are
+   averaged. A month needs 15 days of that year to count, and a year needs six
+   such months before it can vote - otherwise a stub year like 2021, present
+   only for November and December, sets its own baseline from two winter months
+   and calls them typical. */
+const SEASON_MIN_DAYS = 15, SEASON_MIN_MONTHS = 6;
+function renderSeason() {
+  const dayMs = 86400000;
+  const cell = new Map();                    // "year-month" -> [plays, days]
+  const key = (y, m) => y + "-" + m;
+  const bump = (y, m, i, v) => {
+    const k = key(y, m);
+    if (!cell.has(k)) cell.set(k, [0, 0]);
+    cell.get(k)[i] += v;
+  };
+  for (const [k, n] of S.dayCounts) bump(+k.slice(0,4), +k.slice(5,7) - 1, 0, n);
+  const d0 = new Date(S.minUts*1000), d1 = new Date(S.maxUts*1000);
+  for (let d = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate());
+       d <= d1; d = new Date(+d + dayMs)) bump(d.getFullYear(), d.getMonth(), 1, 1);
+
+  const years = [...new Set([...cell.keys()].map(k => +k.split("-")[0]))].sort();
+  const ratios = Array.from({length:12}, () => []);   // month -> one ratio per year
+  const dotX = [], dotY = [], dotT = [];
+  let voting = 0;
+  for (const y of years) {
+    const ms = [];
+    for (let m = 0; m < 12; m++) {
+      const c = cell.get(key(y, m));
+      if (c && c[1] >= SEASON_MIN_DAYS) ms.push(m);
+    }
+    if (ms.length < SEASON_MIN_MONTHS) continue;      // too thin to set a baseline
+    voting++;
+    const yp = ms.reduce((t, m) => t + cell.get(key(y, m))[0], 0);
+    const yd = ms.reduce((t, m) => t + cell.get(key(y, m))[1], 0);
+    if (!yp || !yd) continue;
+    for (const m of ms) {
+      const [p, dd] = cell.get(key(y, m));
+      const r = (p/dd) / (yp/yd);
+      ratios[m].push(r);
+      dotX.push(m); dotY.push(r);
+      dotT.push(`${MONTHS[m]} ${y} – ${r.toFixed(2)}x that year's normal`
+                + `<br>${(p/dd).toFixed(1)} a day against ${(yp/yd).toFixed(1)}`);
+    }
+  }
+
+  const idx = ratios.map(r => r.length ? r.reduce((a,b) => a+b, 0) / r.length : null);
+  const live = idx.map((v, i) => v === null ? null : i).filter(i => i !== null);
+  if (live.length < 2) {           // a first partial year cannot show a season
+    clearFigs("fig-season");
+    $("season-cap").textContent =
+      "A year or so of history is needed before seasons show up — check back.";
+    return;
+  }
+  const hot = live.reduce((a,i) => idx[i] > idx[a] ? i : a, live[0]);
+  const cold = live.reduce((a,i) => idx[i] < idx[a] ? i : a, live[0]);
+
+  // Bars grow from 1.0, so above the line is "busier than usual for me" at a
+  // glance and the height is the size of the effect, not the size of the year.
+  const raw = m => {
+    let p = 0, d = 0;
+    for (const y of years) { const c = cell.get(key(y, m)); if (c) { p += c[0]; d += c[1]; } }
+    return d ? p/d : 0;
+  };
+  plot("fig-season", [
+    {type:"bar", x:[...Array(12).keys()], y:idx.map(v => v === null ? null : v - 1),
+     base:1, marker:{color: idx.map((v,i) => v === null ? "#2b3442"
+       : i === hot ? "#ff8c42" : i === cold ? "#4cc9f0"
+       : v >= 1 ? "#a83745" : "#2f5f74")},
+     hovertext: idx.map((v,i) => v === null ? `${MONTHS[i]} – not enough history yet`
+       : `<b>${MONTHS[i]}</b> – ${v.toFixed(2)}x a typical day for you`
+         + `<br>${raw(i).toFixed(1)} scrobbles a day across ${ratios[i].length} `
+         + `year${ratios[i].length === 1 ? "" : "s"}`),
+     hoverinfo:"text"},
+    {type:"scatter", x:dotX, y:dotY, mode:"markers",
+     marker:{size:6, color:"#ffd07b", opacity:0.8, line:{color:"#161b22", width:1}},
+     hovertext:dotT, hoverinfo:"text"},
+  ], { ...baseLayout(320), margin:{l:12, r:12, t:20, b:26},
+    shapes:[{type:"line", xref:"paper", x0:0, x1:1, y0:1, y1:1,
+             line:{color:"rgba(230,237,243,0.45)", width:1, dash:"dot"}}],
+    xaxis:{tickmode:"array", tickvals:[...Array(12).keys()], ticktext:MONTHS,
+           showgrid:false, zeroline:false, tickfont:{size:11, color:"#8b98a8"}},
+    yaxis:{title:{text:"vs. a typical day", font:{size:11.5, color:"#8b98a8"}},
+           tickformat:".2f", ticksuffix:"x", showgrid:true, gridcolor:GRID,
+           zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}} });
+
+  const swing = idx[hot]/idx[cold];
+  $("season-cap").innerHTML =
+    `Every month scored against the year it happened in, then averaged — so the `
+    + `long slide in how much you listen cannot pass itself off as a season. `
+    + `Bars are the average across ${fmtN(voting)} years, dots are those years one `
+    + `by one; the dotted line is an ordinary day. <b>${MONTHS[hot]}</b> runs `
+    + `${idx[hot].toFixed(2)}x normal and <b>${MONTHS[cold]}</b> ${idx[cold].toFixed(2)}x`
+    + (swing >= 1.25 ? `, a ${swing.toFixed(2)}x spread across the year.`
+                     : ` — your year is close to flat.`);
 }
 
 function renderCumulative(topA) {
