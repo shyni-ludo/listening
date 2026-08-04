@@ -8,13 +8,19 @@
 
 const UPSTREAM = "https://ws.audioscrobbler.com/2.0/";
 
-/* Only the one read the app actually makes. Anything else is refused, so this
+/* Only the reads the app actually makes. Anything else is refused, so this
    cannot be repurposed as somebody's free last.fm proxy. */
-const ALLOWED_METHODS = new Set(["user.getrecenttracks"]);
+const ALLOWED_METHODS = new Set(["user.getrecenttracks", "artist.getTopTags"]);
 
 /* Parameters forwarded upstream. Anything not listed here is dropped —
    notably api_key, so a caller cannot override the server's key. */
-const FORWARD = ["method", "user", "limit", "page", "from", "to"];
+const FORWARD = ["method", "user", "limit", "page", "from", "to", "artist", "autocorrect"];
+
+/* An artist's tags are the same for every visitor and barely change, so they
+   are cached at the edge for a month: the second person to look up a given
+   artist costs last.fm nothing. Scrobbles are per-user and must stay fresh. */
+const CACHE_TTL = { "artist.getTopTags": 2592000 };
+const DEFAULT_TTL = 60;
 
 const ALLOWED_ORIGINS = new Set([
   "https://shyni-ludo.github.io",
@@ -71,7 +77,7 @@ export default {
     let res;
     try {
       res = await fetch(out.toString(), {
-        cf: { cacheTtl: 60, cacheEverything: true },
+        cf: { cacheTtl: CACHE_TTL[method] || DEFAULT_TTL, cacheEverything: true },
         headers: { "User-Agent": "listening-report (github.com/shyni-ludo/listening)" },
       });
     } catch (e) {

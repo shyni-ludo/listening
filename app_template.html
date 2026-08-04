@@ -30,6 +30,7 @@
 body { background:#0d1117; color:#e6edf3; margin:0; padding:0 20px 30px;
        font-family:'Inter','Segoe UI',system-ui,sans-serif; min-height:100vh; }
 body[data-tab='overview']  { --a:#ff8c42; --b:#ff5964; --c:#ffd07b; }
+body[data-tab='artists']   { --a:#a78bfa; --b:#7c5cd6; --c:#f0abfc; }
 body[data-tab='forgotten'] { --a:#ff8c42; --b:#e0523c; --c:#ffd07b; }
 body[data-tab='evergreen'] { --a:#06d6a0; --b:#4cc9f0; --c:#b388eb; }
 .wrap { max-width:1180px; margin:0 auto; }
@@ -70,9 +71,10 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .panel h2 { margin:0 0 3px; font-size:19px; font-weight:700; }
 .cap { color:#8b98a8; font-size:13px; margin:0 0 12px; }
 .cal-year { margin-bottom:2px; }
+.grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 .grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 .gridy { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px; }
-.grid3 h3 { color:#e6edf3; font-size:14px; margin:4px 0 0; text-align:center; }
+.grid2 h3, .grid3 h3 { color:#e6edf3; font-size:14px; margin:4px 0 0; text-align:center; }
 footer { color:#5d6a78; font-size:12px; text-align:center; margin:44px 0 8px; }
 
 /* ---- tables ---- */
@@ -170,10 +172,11 @@ tbody tr.extra.revealed { display:table-row; }
      shrink below its content and a chart that rendered wide would pin it there */
   .grid3 { grid-template-columns:minmax(0,1fr); gap:4px; }
   .grid3 h3 { margin-top:12px; }
+  .grid2 { grid-template-columns:minmax(0,1fr); gap:4px; }
   /* 11-column score tables scroll sideways instead of being crushed */
-  #f-table, #e-table, #fig-bump { overflow-x:auto; }
-  #fig-bump .plot-container { min-width:560px; }
-  #f-table table, #e-table table { min-width:620px; }
+  #f-table, #e-table, #a-table, #fig-bump, #fig-aspan { overflow-x:auto; }
+  #fig-bump .plot-container, #fig-aspan .plot-container { min-width:560px; }
+  #f-table table, #e-table table, #a-table table { min-width:620px; }
   .tbl-controls { flex-wrap:wrap; }
   .search { min-width:100%; }
   .matches { min-width:auto; }
@@ -230,6 +233,7 @@ tbody tr.extra.revealed { display:table-row; }
   <nav class="tabs">
     <div class="brand" id="brand" title="start over">♪ my <em>listening</em></div>
     <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="artists">Artists</button>
     <button class="tab" data-tab="forgotten">Forgotten songs</button>
     <button class="tab" data-tab="evergreen">Evergreen songs</button>
   </nav>
@@ -279,6 +283,22 @@ tbody tr.extra.revealed { display:table-row; }
         low means you were replaying what you already loved. The bold line is a 6-month
         trend — the monthly figure alone is too jumpy to read.</p>
       <div id="fig-newshare"></div></section>
+  </main>
+
+  <main id="tab-artists" class="tabpage">
+    <header><h1>Artists</h1><p class="tag" id="a-tag">Every artist you've ever scrobbled — when they
+      arrived, how hard they burned, and whether they stayed.</p></header>
+    <div class="cards" id="a-cards"></div>
+    <section class="panel"><h2>When each one was in your life</h2>
+      <p class="cap" id="a-span-cap"></p><div id="fig-aspan"></div></section>
+    <section class="panel"><h2>Flashes and lifers</h2>
+      <p class="cap" id="a-shape-cap"></p>
+      <div class="grid2"><div><h3>Flashes</h3><div id="fig-flash"></div></div>
+        <div><h3>Lifers</h3><div id="fig-lifer"></div></div></div></section>
+    <section class="panel"><h2>How deep you went</h2>
+      <p class="cap" id="a-depth-cap"></p><div id="fig-adepth"></div></section>
+    <section class="panel"><h2>Every artist</h2>
+      <p class="cap" id="a-table-cap"></p><div id="a-table"></div></section>
   </main>
 
   <main id="tab-forgotten" class="tabpage">
@@ -414,6 +434,46 @@ function compute(rows) {
     e.everScore = e.activeMonths * e.coverage;
   }
   s.bySong = bySong; s.qHistMap = qHistMap; s.refMs = refMs;
+
+  /* per-artist stats, for the artists tab. Deliberately NOT filtered by
+     EXCLUDE: that list exists so two ironically-titled tracks stay out of the
+     forgotten/evergreen rankings, and honouring it here would put this map
+     quietly at odds with artistCounts and the all-time charts. */
+  const byArtist = new Map();
+  const aMonths = new Map(), aTracks = new Map(), aPeak = new Map(), aqHist = new Map();
+  for (const [uts, artist, album, track] of rows) {
+    const d = new Date(uts*1000), mk = mKey(d), qk = qKey(d);
+    let e = byArtist.get(artist);
+    if (!e) {
+      e = {artist, plays:0, first:uts, last:uts};
+      byArtist.set(artist, e);
+      aMonths.set(artist, new Set()); aTracks.set(artist, new Set());
+    }
+    e.plays++; if (uts < e.first) e.first = uts; if (uts > e.last) e.last = uts;
+    aMonths.get(artist).add(mk);
+    aTracks.get(artist).add(track);
+    const pmk = artist+"|"+mk;
+    aPeak.set(pmk, (aPeak.get(pmk)||0) + 1);
+    const qh = aqHist.get(artist) || {}; qh[qk] = (qh[qk]||0) + 1; aqHist.set(artist, qh);
+  }
+  for (const [a, e] of byArtist) {
+    let peakM = 0, peakN = 0;
+    for (const mk of aMonths.get(a)) {
+      const n = aPeak.get(a+"|"+mk) || 0;
+      if (n > peakN) { peakN = n; peakM = mk; }
+    }
+    e.peakMonth = peakM; e.peakPlays = peakN;
+    e.activeMonths = aMonths.get(a).size;
+    e.trackCount = aTracks.get(a).size;
+    e.availMonths = refM - mKey(new Date(e.first*1000)) + 1;
+    e.coverage = e.activeMonths / e.availMonths;
+    e.daysGone = ((refMs - e.last*1000) / 86400000) | 0;
+    e.lifespan = ((e.last - e.first) / 86400) | 0;
+    e.alive = e.daysGone <= RECENT_DAYS;
+    e.burst = e.peakPlays / e.plays;      // share of everything they got, in one month
+    e.everScore = e.activeMonths * e.coverage;   // same shape as the song version
+  }
+  s.byArtist = byArtist; s.aqHist = aqHist;
   return s;
 }
 
@@ -1364,23 +1424,247 @@ function renderEvergreen() {
     });
 }
 
+/* ================================================================== artists */
+/* Both other tabs rank songs; the artist was never the subject of anything,
+   even though compute() already held most of this. Shape needs a floor to mean
+   anything — one play in one month is 100% concentrated and says nothing — so
+   the two ranked lists take a play threshold. The table still shows everyone. */
+const ART_MIN_PLAYS = 60, ART_SPAN_ROWS = 24, ART_BARS = 12, ART_SETTLED = 6;
+
+/* Plotly merges category rows that share a label, and trunc() turns two long
+   artist names into the same string easily. Pad only the repeats, invisibly. */
+function uniqLabels(names) {
+  const seen = new Map();
+  return names.map(n => {
+    const c = (seen.get(n) || 0) + 1;
+    seen.set(n, c);
+    return c > 1 ? n + " ".repeat(c - 1) : n;
+  });
+}
+
+function renderArtists() {
+  const all = [...S.byArtist.values()].sort((a, b) => b.plays - a.plays);
+  const refM = mKey(new Date(S.refMs));
+  const once = all.filter(e => e.plays === 1).length;
+  const tracksOnce = [...S.pairCounts.values()].filter(n => n === 1).length;
+  const deep = all.filter(e => e.plays >= ART_MIN_PLAYS);
+  const longest = all.reduce((a, e) => e.lifespan > a.lifespan ? e : a, all[0]);
+  const binge = all.reduce((a, e) => e.peakPlays > a.peakPlays ? e : a, all[0]);
+
+  $("a-tag").innerHTML = `<b>${fmtN(all.length)}</b> artists behind ${fmtN(S.total)} scrobbles — `
+    + `when each one arrived, how hard they burned, and whether they stayed.`;
+  cards("a-cards", [
+    [fmtN(all.length), "Artists you've heard",
+     `${fmtN(deep.length)} of them with ${ART_MIN_PLAYS}+ plays`],
+    [fmtN(once), "Heard exactly once",
+     `${(100*once/all.length).toFixed(0)}% of your artists · ${(100*once/S.total).toFixed(1)}% of your plays`],
+    [esc(trunc(longest.artist, 22)), "Longest relationship",
+     `${fmtSpan(longest.lifespan)} · ${fmtN(longest.plays)} plays`],
+    [fmtN(binge.peakPlays), "Biggest month on one artist",
+     `${esc(trunc(binge.artist, 20))} · ${mLabel(binge.peakMonth)}`],
+    [fmtN(deep.filter(e => e.alive).length), "Still in rotation",
+     `of ${fmtN(deep.length)} regulars · played in the last ${RECENT_DAYS} days`],
+    [fmtN(tracksOnce), "Tracks played once",
+     `${(100*tracksOnce/S.pairCounts.size).toFixed(0)}% of the ${fmtN(S.pairCounts.size)} you've ever played`],
+  ]);
+
+  /* Four panels, drawn together: the tab itself is already lazy (tabRendered),
+     and lazyPanels keeps a single observer that the overview owns. */
+  renderArtistSpans(all.slice(0, ART_SPAN_ROWS));
+  renderArtistShape(deep, refM);
+  renderArtistDepth(all);
+  renderArtistTable(all);
+}
+
+function renderArtistSpans(top) {
+  if (top.length < 2) { clearFigs("fig-aspan"); $("a-span-cap").textContent =
+    "Not enough history yet to lay artists out on a timeline."; return; }
+  /* Ordered by when they peaked, not when they were found. Sorting by first
+     play looked obvious and drew a wall: the top artists nearly all arrive in
+     the account's opening days and nearly all run to today, so 23 of 24 bars
+     started in the same place and ended in the same place. Peaks are spread
+     over years, so this puts the diamonds on a diagonal and the list reads as
+     the order in which each artist had its moment. */
+  const rows = [...top].sort((a, b) => a.peakMonth - b.peakMonth);
+  const ylab = uniqLabels(rows.map(e => trunc(e.artist, 24)));
+  const DAY = 86400000;
+  plot("fig-aspan", [
+    {type:"bar", orientation:"h", y:ylab, width:0.55,
+     base: rows.map(e => e.first*1000),
+     // a same-day first and last would otherwise draw nothing at all
+     x: rows.map(e => Math.max((e.last - e.first)*1000, 5*DAY)),
+     marker:{color: rows.map(e => e.alive ? "#a78bfa" : "#3d4658")},
+     hovertext: rows.map(e => `<b>${esc(e.artist)}</b><br>${fmtDate(e.first)} → ${fmtDate(e.last)}`
+       + `<br>${fmtN(e.plays)} plays of ${fmtN(e.trackCount)} track${e.trackCount === 1 ? "" : "s"}`
+       + `, across ${fmtN(e.activeMonths)} month${e.activeMonths === 1 ? "" : "s"}`
+       + (e.alive ? "<br>still in rotation" : `<br>quiet for ${fmtSpan(e.daysGone)}`)),
+     hoverinfo:"text"},
+    {type:"scatter", mode:"markers", y:ylab,
+     x: rows.map(e => +new Date((e.peakMonth/12)|0, e.peakMonth%12, 15)),
+     marker:{size:9, symbol:"diamond", color:"#ffd07b", line:{color:"#161b22", width:1.5}},
+     hovertext: rows.map(e => `${esc(e.artist)} peaked in ${mLabel(e.peakMonth)}`
+       + `<br>${fmtN(e.peakPlays)} plays that month — ${(100*e.burst).toFixed(0)}% of everything you gave them`),
+     hoverinfo:"text"},
+  ], { ...baseLayout(26*rows.length + 96), bargap:0.3,
+    margin:{l:12, r:20, t:16, b:30},
+    xaxis:{type:"date", showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}},
+    yaxis:{type:"category", autorange:"reversed", showgrid:false, zeroline:false,
+           tickfont:{size:11, color:"#c9d4e0"}} });
+
+  const alive = rows.filter(e => e.alive).length;
+  $("a-span-cap").innerHTML = `Your ${fmtN(rows.length)} most-played artists, top to bottom in the `
+    + `order they peaked — so the <b style="color:#ffd07b">◆</b> diagonal is your taste moving. `
+    + `Each bar runs from first play to last, which makes the stretch after the diamond the fade `
+    + `and a short bar an artist who burned out fast. <b style="color:#a78bfa">Purple</b> means `
+    + `still in rotation (${fmtN(alive)} of ${fmtN(rows.length)}); grey means gone quiet.`;
+}
+
+function renderArtistShape(deep, refM) {
+  /* A peak only weeks old cannot be called a flash yet — the artist may simply
+     be new, and every brand-new artist is 100% concentrated by definition. */
+  const settled = deep.filter(e => refM - e.peakMonth >= ART_SETTLED);
+  const flash = [...settled].sort((a, b) => b.burst - a.burst).slice(0, ART_BARS);
+  const lifer = deep.filter(e => e.availMonths >= 12 && e.coverage >= 0.6)
+    .sort((a, b) => b.activeMonths - a.activeMonths).slice(0, ART_BARS);
+
+  /* Ranked bars were the obvious build and they failed: months-active saturates
+     against the length of the account, so the top twelve lifers came out 58, 57,
+     57, 57, 55, 55, 55… — twelve identical bars encoding nothing. The shape is
+     the actual subject of this panel, so draw the shape. Same scale on both
+     sides, each row normalised against its own best quarter, which makes a
+     flash one bright stripe and a lifer a continuous band. */
+  const fullQ = [...new Set([...S.monthCounts.keys()]
+    .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a, b) => a-b);
+
+  const ribbon = (id, rows, note) => {
+    if (rows.length < 3) { clearFigs(id); return false; }
+    const src = [...rows].reverse();      // a heatmap's first row is the bottom one
+    const y = uniqLabels(src.map(e => trunc(e.artist, 17) + " · " + note(e)));
+    const z = [], txt = [];
+    for (const e of src) {
+      const qh = S.aqHist.get(e.artist) || {};
+      const vals = fullQ.map(q => qh[q] || 0);
+      const mx = Math.max(...vals, 1);
+      z.push(vals.map(v => 100*v/mx));
+      txt.push(fullQ.map((q, i) => `<b>${esc(e.artist)}</b> — ${qLabel(q)}`
+        + `<br>${fmtN(vals[i])} plays`));
+    }
+    plot(id, [{type:"heatmap", z, y, x: fullQ.map(qLabel), text: txt, hoverinfo:"text",
+      colorscale: CAL_SCALE, zmin:0, zmax:100, showscale:false, xgap:1.5, ygap:1.5}],
+      { ...baseLayout(23*rows.length + 54), margin:{l:12, r:12, t:10, b:24},
+        xaxis:{showgrid:false, zeroline:false, tickangle:0,
+               tickfont:{size:9.5, color:"#8b98a8"},
+               tickmode:"array", tickvals: fullQ.filter((_, i) => i % 4 === 0).map(qLabel)},
+        yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
+    return true;
+  };
+
+  const gotFlash = ribbon("fig-flash", flash, e => `${(100*e.burst).toFixed(0)}%`);
+  const gotLifer = ribbon("fig-lifer", lifer, e => `${e.activeMonths} mo`);
+
+  $("a-shape-cap").innerHTML = (gotFlash || gotLifer)
+    ? `Two ways an artist can matter, quarter by quarter, each row scaled against its own `
+      + `busiest quarter. <b>Flashes</b> arrived, consumed a month and left — the percentage is `
+      + `how much of everything you ever played them landed in one single month. <b>Lifers</b> `
+      + `never left; the number is how many separate months they turned up in. Both need `
+      + `${ART_MIN_PLAYS}+ plays, and a flash's peak has to be at least ${ART_SETTLED} months old, `
+      + `or every artist you just discovered would qualify.`
+    : `Needs a few artists with ${ART_MIN_PLAYS}+ plays before shapes mean anything — check back.`;
+}
+
+function renderArtistDepth(all) {
+  const B = [[1, 1, "1 play"], [2, 5, "2–5"], [6, 20, "6–20"],
+             [21, 100, "21–100"], [101, 500, "101–500"], [501, Infinity, "500+"]];
+  const nA = B.map(() => 0), nP = B.map(() => 0);
+  for (const e of all) {
+    const i = B.findIndex(([lo, hi]) => e.plays >= lo && e.plays <= hi);
+    if (i >= 0) { nA[i]++; nP[i] += e.plays; }
+  }
+  const totA = all.length, totP = nP.reduce((a, b) => a + b, 0) || 1;
+  const lab = B.map(b => b[2]);
+  /* Counts and plays on one linear axis would hide the small buckets entirely
+     (1,900 artists against 30). As shares of their own totals they sit in the
+     same 0–100 units, and the crossover between the two series is the point. */
+  plot("fig-adepth", [
+    {type:"bar", x:lab, y:nA.map(n => 100*n/totA), name:"share of your artists",
+     marker:{color:"#7c5cd6"},
+     hovertext: nA.map((n, i) => `<b>${lab[i]}</b><br>${fmtN(n)} artists — `
+       + `${(100*n/totA).toFixed(1)}% of everyone you've heard`), hoverinfo:"text"},
+    {type:"bar", x:lab, y:nP.map(n => 100*n/totP), name:"share of your plays",
+     marker:{color:"#f0abfc"},
+     hovertext: nP.map((n, i) => `<b>${lab[i]}</b><br>${fmtN(n)} scrobbles — `
+       + `${(100*n/totP).toFixed(1)}% of everything you've played`), hoverinfo:"text"},
+  ], { ...baseLayout(340), barmode:"group", bargap:0.3, bargroupgap:0.12,
+    showlegend:true, margin:{l:12, r:12, t:44, b:30},
+    legend:{orientation:"h", y:1.12, x:0, font:{size:11.5, color:"#8b98a8"}},
+    xaxis:{title:{text:"lifetime plays of that artist", font:{size:11.5, color:"#8b98a8"}},
+           showgrid:false, zeroline:false, tickfont:{size:11, color:"#8b98a8"}},
+    yaxis:{ticksuffix:"%", showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10.5, color:"#8b98a8"}} });
+
+  const top = B.length - 1;
+  $("a-depth-cap").innerHTML = `Almost everyone you've ever played, you barely played. `
+    + `<b>${fmtN(nA[0])} artists</b> got exactly one scrobble — ${(100*nA[0]/totA).toFixed(0)}% of `
+    + `everyone you've heard, and ${(100*nP[0]/totP).toFixed(1)}% of what you actually listened to. `
+    + `At the other end, the <b>${fmtN(nA[top])}</b> artists past 500 plays are `
+    + `${(100*nA[top]/totA).toFixed(1)}% of the names and <b>${(100*nP[top]/totP).toFixed(0)}%</b> `
+    + `of the listening.`;
+}
+
+function renderArtistTable(all) {
+  const fullQ = [...new Set([...S.monthCounts.keys()]
+    .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a, b) => a-b);
+  $("a-table-cap").innerHTML = `Every artist, most played first. The green dot means you've played `
+    + `them in the last ${RECENT_DAYS} days; coverage is the share of months since you first heard `
+    + `them that they turned up in.`;
+  buildSongTable("art", "a-table",
+    `<th>#</th><th>Artist</th><th>Plays</th><th>Tracks</th><th>First heard</th>
+     <th>Last heard</th><th title='distinct months with at least one play'>Months</th>
+     <th title='share of the months since you first heard them'>Coverage</th>
+     <th>Peak month</th><th>History</th>`,
+    all, (e, i) => {
+      const rc = i===0?"r1":i===1?"r2":i===2?"r3":"";
+      const dot = e.alive
+        ? `<span class='alive' title='played in the last ${RECENT_DAYS} days'></span>` : "";
+      return `<tr><td class='rank ${rc}'>${i+1}</td>
+        <td class='song'>${dot}${esc(trunc(e.artist,34))}</td>
+        <td class='num-c'>${fmtN(e.plays)}</td><td class='num-c'>${fmtN(e.trackCount)}</td>
+        <td>${fmtDate(e.first)}</td><td>${fmtDate(e.last)}</td>
+        <td class='num-c'>${fmtN(e.activeMonths)}</td>
+        <td>${(100*e.coverage).toFixed(0)}%</td>
+        <td>${mLabel(e.peakMonth)} <span class='dim'>(${e.peakPlays}×)</span></td>
+        <td>${sparkline(S.aqHist.get(e.artist) || {}, fullQ)}</td></tr>`;
+    },
+    {keyFn: e => e.artist.toLowerCase(), noun: "artists", placeholder: "Search artist…"});
+}
+
 /* --------------------------------------------------------- table machinery */
 const TBL = {};
-function tableShell(prefix, n, head) {
+function tableShell(prefix, n, head, placeholder) {
   return `<div class='tbl-controls'>
-    <input id='q_${prefix}' class='search' type='text' placeholder='Search title or artist…' autocomplete='off'>
+    <input id='q_${prefix}' class='search' type='text' placeholder='${placeholder}' autocomplete='off'>
     <span id='match_${prefix}' class='matches'></span>
     <button class='btn' id='btn_${prefix}'></button></div>
     <table id='ftable_${prefix}' data-n='${fmtN(n)}'><thead><tr>${head}</tr></thead>
     <tbody id='tb_${prefix}'></tbody></table>`;
 }
-function buildSongTable(prefix, containerId, head, cand, rowFn) {
+/* opts lets the artists table reuse all of this: it has no track column, so it
+   needs its own search key and its own noun on the show-all button. */
+function buildSongTable(prefix, containerId, head, cand, rowFn, opts = {}) {
+  const keyFn = opts.keyFn || (e => (e.track + " " + e.artist).toLowerCase());
+  /* Rows are built on demand, not up front. applyTable never shows more than
+     CAP of them, and the artists table holds every artist ever scrobbled —
+     6k rows, each with a sparkline SVG, is ~16 MB of string nobody looks at. */
   TBL[prefix] = {
-    keys: cand.map(e => (e.track + " " + e.artist).toLowerCase()),
-    rows: cand.map((e, i) => rowFn(e, i)),
+    keys: cand.map(keyFn),
+    items: cand,
+    rowFn,
     showAll: false,
+    noun: opts.noun || "songs",
   };
-  $(containerId).innerHTML = tableShell(prefix, cand.length, head);
+  $(containerId).innerHTML = tableShell(prefix, cand.length, head,
+    opts.placeholder || "Search title or artist…");
   $("q_" + prefix).addEventListener("input", () => {
     TBL[prefix].showAll = false; applyTable(prefix);
   });
@@ -1397,18 +1681,22 @@ function applyTable(prefix) {   // render rows on demand — keeps the DOM light
     idx = [];
     for (let i = 0; i < t.keys.length; i++) if (t.keys[i].includes(s)) idx.push(i);
   } else if (t.showAll) {
-    idx = t.rows.map((_, i) => i);
+    idx = t.items.map((_, i) => i);
   } else {
-    idx = t.rows.slice(0, TABLE_PREVIEW).map((_, i) => i);
+    idx = t.items.slice(0, TABLE_PREVIEW).map((_, i) => i);
   }
   const CAP = 400;
-  $("tb_" + prefix).innerHTML = idx.slice(0, CAP).map(i => t.rows[i]).join("");
+  // i is the item's own index, so rank numbering survives filtering
+  $("tb_" + prefix).innerHTML =
+    idx.slice(0, CAP).map(i => t.rowFn(t.items[i], i)).join("");
+  // "Show all 6,140" that quietly renders 400 was tolerable at 1,459 songs and
+  // is not at 6k artists — say what is actually on screen either way.
   $("match_" + prefix).textContent = s
-    ? fmtN(idx.length) + " found" + (idx.length > CAP ? ` — showing first ${CAP}` : "")
-    : "";
+    ? fmtN(idx.length) + " found" + (idx.length > CAP ? ` — showing first ${fmtN(CAP)}` : "")
+    : (idx.length > CAP ? `showing first ${fmtN(CAP)} of ${fmtN(idx.length)}` : "");
   $("btn_" + prefix).textContent = t.showAll
     ? "Show top " + TABLE_PREVIEW
-    : "Show all " + fmtN(t.rows.length) + " songs";
+    : "Show all " + fmtN(t.items.length) + " " + t.noun;
 }
 
 /* ================================================================ tabs/main */
@@ -1420,8 +1708,8 @@ $("brand").addEventListener("click", () => {
   $("app").style.display = "none";
   $("landing").classList.remove("hidden");
 });
-const tabRendered = { forgotten: false, evergreen: false };
-const TABS = ["overview", "forgotten", "evergreen"];
+const tabRendered = { artists: false, forgotten: false, evergreen: false };
+const TABS = ["overview", "artists", "forgotten", "evergreen"];
 
 /* The hash carries the whole view — user, tab and range — so a link to one
    tab survives a reload and can be shared, not just the username. */
@@ -1445,7 +1733,8 @@ function activate(name, opts = {}) {
   if (!opts.silent) syncHash(opts.replace ? "replace" : "push");
   if (S && name in tabRendered && !tabRendered[name]) {  // lazy: render on first visit
     tabRendered[name] = true;
-    if (name === "forgotten") renderForgotten();
+    if (name === "artists") renderArtists();
+    else if (name === "forgotten") renderForgotten();
     else renderEvergreen();
   }
   document.querySelectorAll("#tab-" + name + " .js-plotly-plot")
