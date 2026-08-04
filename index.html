@@ -83,7 +83,10 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .subcard { background:#11151c; border:1px solid #222b36; border-radius:10px;
            padding:8px 8px 4px; min-width:0; }
 .subcard h3 { margin:2px 0 4px; }
-.grid2.split { gap:20px; }
+/* Stacked rather than side by side: a twelve-entry legend needs the full panel
+   width to pack into two rows instead of six, and one chart above another cannot
+   be mistaken for one chart's labels belonging to the other. */
+.stack2 { display:grid; gap:16px; }
 /* one clickable family per chip, tinted with that family's colour */
 .chips { display:flex; flex-wrap:wrap; gap:7px; margin:2px 0 14px; }
 .chip { display:inline-flex; align-items:center; gap:7px; cursor:pointer;
@@ -197,7 +200,7 @@ tbody tr.extra.revealed { display:table-row; }
   #f-table, #e-table, #a-table, #g-table, #fig-bump, #fig-aspan,
   #fig-gstream, #fig-gmove, #fig-ginside { overflow-x:auto; }
   #fig-bump .plot-container, #fig-aspan .plot-container,
-  #fig-gstream .plot-container, #fig-gmove .plot-container { min-width:520px; }
+  #fig-gstream .plot-container, #fig-gmove .plot-container { min-width:560px; }
   #fig-ginside .plot-container { min-width:300px; }
   #f-table table, #e-table table, #a-table table, #g-table table { min-width:620px; }
   .tbl-controls { flex-wrap:wrap; }
@@ -336,7 +339,7 @@ tbody tr.extra.revealed { display:table-row; }
       <div class="chips" id="g-chips"></div><div id="fig-ginside"></div></section>
     <section class="panel"><h2>How your taste moved</h2>
       <p class="cap" id="g-time-cap"></p>
-      <div class="grid2 split">
+      <div class="stack2">
         <div class="subcard"><h3>What each quarter was made of</h3><div id="fig-gstream"></div></div>
         <div class="subcard"><h3>What grew, what faded</h3><div id="fig-gmove"></div></div>
       </div></section>
@@ -2127,60 +2130,40 @@ function renderGenreDrift(fams) {
     return;
   }
 
+  /* Bands stack biggest at the bottom, and the legend is in that same order, so
+     it doubles as the ranking. Naming bands in place was tried and abandoned: it
+     only works when every band is thick somewhere, which is true of some
+     accounts and not others — a lopsided library leaves half the families too
+     thin to hold text and the labels pile up along the top edge. A legend does
+     not care how the listening is distributed. */
+  const fTot = fams.reduce((a, g) => a + g.plays, 0) || 1;
+  /* A twelve-entry horizontal legend packs into three rows across a full-width
+     panel and into twelve on a phone, where every entry claims its own line.
+     Measured: 67px of legend at 1112px wide against 238px at 303px. Buy the
+     extra height rather than let the legend eat the chart — at 500px tall a
+     phone was left with 218px of actual plot. */
+  const wide = ($("fig-gstream").clientWidth || 900) >= 700;
   plot("fig-gstream", fams.map(g => ({          // first trace is the bottom band
     type:"scatter", mode:"none", stackgroup:"one", groupnorm:"percent",
-    name: g.genre, x: q.map(qLabel), y: q.map(k => g.qh[k] || 0),
+    name: `${g.genre} · ${(100*g.plays/fTot).toFixed(1)}%`,
+    x: q.map(qLabel), y: q.map(k => g.qh[k] || 0),
     fillcolor: FAM_COLOR[g.genre] || "#8b98a8", hoverinfo:"text",
     text: q.map((k, i) => `<b>${esc(g.genre)}</b> — ${qLabel(k)}`
       + `<br>${(100*(g.qh[k]||0)/(qt[i]||1)).toFixed(1)}% of that quarter`
       + `<br>${fmtN(g.qh[k] || 0)} scrobbles`) })),
-    { ...baseLayout(460), margin:{l:12, r:12, t:10, b:30}, hovermode:"closest",
+    { ...baseLayout(wide ? 500 : 690), margin:{l:12, r:12, t:10, b:26}, hovermode:"closest",
       xaxis:{showgrid:false, zeroline:false, tickfont:{size:10, color:"#8b98a8"},
              tickmode:"array", tickvals: q.filter(k => k%4 === 0).map(qLabel),
              ticktext: q.filter(k => k%4 === 0).map(k => String((k/4)|0))},
       yaxis:{showgrid:false, zeroline:false, range:[0,100], ticksuffix:"%",
              tickfont:{size:10, color:"#8b98a8"}},
-      /* Every band gets its name, placed at the quarter where that band is at
-         its thickest rather than at a fixed column. Labelling the middle quarter
-         instead left half the families anonymous and put the rest wherever their
-         band happened to be thin, which read as labels floating near the wrong
-         colour. Measured here, the narrowest family still reaches 8.3% at its
-         own best quarter, which is comfortably enough room at this height. */
-      annotations: (() => {
-        const share = [], out = [], placed = [];
-        for (const g of fams) share.push(q.map((k,i) => 100*(g.qh[k] || 0)/(qt[i] || 1)));
-        const mid = f => {                    // centre of band f, in stacked percent
-          const b = [];
-          for (let i = 0; i < q.length; i++) {
-            let s = 0;
-            for (let k = 0; k < f; k++) s += share[k][i];
-            b.push(s + share[f][i]/2);
-          }
-          return b;
-        };
-        /* Widest-quarter alone still collided: Metal peaks at 2024 Q2 and Chill
-           & Downtempo at 2024 Q3, two points of stack apart, which overlaps at
-           this height. So each family takes the thickest quarter that does not
-           land on top of an already-placed label, biggest family choosing first.
-           A label needs roughly 4 points of vertical clearance and four columns
-           of horizontal room, hence the window below. */
-        const XWIN = 4, YGAP = 4.2;
-        for (let f = 0; f < fams.length; f++) {
-          const c = mid(f), s = share[f], best = Math.max(...s);
-          const cand = s.map((v, i) => i)
-            .filter(i => s[i] >= Math.max(3, 0.5*best))
-            .sort((a, b) => s[b] - s[a]);
-          let at = cand.find(i =>
-            !placed.some(p => Math.abs(p.i - i) <= XWIN && Math.abs(p.y - c[i]) < YGAP));
-          if (at === undefined) at = s.indexOf(best);   // rather overlap than go unnamed
-          placed.push({i: at, y: c[at]});
-          out.push({ x: qLabel(q[at]), y: c[at], text: fams[f].genre,
-            showarrow:false, font:{size:10.5, color:"#11151c"},
-            // keep the first and last columns' labels from hanging off the plot
-            xanchor: at <= 1 ? "left" : at >= q.length-2 ? "right" : "center" });
-        }
-        return out;
-      })() });
+      showlegend:true,
+      /* Clicking a legend entry would hide that band, and because the stack is
+         percent-normalised the remaining eleven would silently rescale to fill
+         the gap. That reads as data changing, so the entries are inert. */
+      legend:{orientation:"h", x:0, xanchor:"left", y:-0.08, yanchor:"top",
+              traceorder:"normal", font:{size:10.5, color:"#c9d4e0"},
+              itemclick:false, itemdoubleclick:false, bgcolor:"rgba(0,0,0,0)"} });
 
   /* Endpoint years are the thinnest — 2021 holds 2,409 classified plays here
      against 2022's 27,224 — so first-year-to-last-year deltas are mostly noise
@@ -2206,7 +2189,7 @@ function renderGenreDrift(fams) {
     hovertext: moves.map(m => `<b>${esc(m.name)}</b><br>${m.e.toFixed(1)}% of the first half`
       + `<br>${m.l.toFixed(1)}% of the second<br>${m.d >= 0 ? "gained" : "lost"} `
       + `${Math.abs(m.d).toFixed(1)} points`), hoverinfo:"text"}],
-    { ...baseLayout(460), bargap:0.32, margin:{l:12, r:12, t:10, b:30},
+    { ...baseLayout(430), bargap:0.32, margin:{l:12, r:12, t:10, b:34},
       xaxis:{showgrid:false, zeroline:true, zerolinecolor:"#3a4552", zerolinewidth:1,
              title:{text:"percentage points", font:{size:10, color:"#8b98a8"}},
              tickfont:{size:10, color:"#8b98a8"},
@@ -2217,8 +2200,9 @@ function renderGenreDrift(fams) {
   const up = moves[moves.length-1], down = moves[0];
   const at = q[cut];
   $("g-time-cap").innerHTML = `Twelve families, and every classified play sits in exactly one — `
-    + `nothing is bucketed as "other" because nothing is left over. On the left, the thickness of `
-    + `a band is that family's share of the quarter. On the right, its share of your first `
+    + `nothing is bucketed as "other" because nothing is left over. Above, the thickness of a band `
+    + `is that family's share of the quarter, stacked biggest at the bottom — the legend runs in `
+    + `that same order, so it doubles as your ranking. Below, each family's share of your first `
     + `${fmtN(eN)} classified plays against your most recent ${fmtN(lN)}, split at `
     + `<b>${qLabel(at)}</b>. <b>${esc(up.name)}</b> gained ${up.d.toFixed(1)} points and `
     + `<b>${esc(down.name)}</b> lost ${Math.abs(down.d).toFixed(1)}.`;
