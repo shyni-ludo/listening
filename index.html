@@ -2108,38 +2108,94 @@ function renderGenreBars(list, classified) {
    panel so one stays lit, and a click pins that state — which is the only way to
    get at it on a phone, where nothing hovers.
 
-   This drops opacity on the rendered trace groups rather than going through
-   Plotly.restyle. Restyle re-renders, and a re-render rebuilds the legend DOM
-   out from under the very listeners doing the highlighting. */
+   Two things here are not what they look like, and both of them were bugs.
+
+   The band you can see for trace i is a <path class="js-fill">, and Plotly
+   draws it inside trace i-1's group. Dimming the <g class="trace"> elements
+   therefore dims every band one place too high — clicking the grey key lit the
+   yellow band, and the topmost group holds no fill at all. Each path carries
+   the trace it belongs to, so that is what they are keyed off.
+
+   And the bands are not hoverable. With mode:"none" the only hover targets are
+   the polyline vertices, which sit on the boundaries between bands and are
+   gated by hoverdistance, so the middle of a band was dead space and whatever
+   was lit last stayed lit. Plotly's own answer to that, hoveron:"fills", was
+   measured here and names the wrong band near the foot of the stack. So the
+   hit test is done below instead, against the same cumulative percentages the
+   chart is drawn from — exact by construction, and checked against Plotly's
+   own fill geometry at 1,521 points across the plot with no disagreement.
+
+   Opacity is set on the rendered nodes rather than through Plotly.restyle:
+   restyle re-renders, and a re-render rebuilds the DOM out from under the very
+   listeners doing the highlighting. */
 function focusBands(id) {
   const gd = $(id);
-  const bands = [...gd.querySelectorAll(".scatterlayer > g.trace")];
-  const keys = [...gd.querySelectorAll(".legend .traces")];
-  if (!bands.length || keys.length !== bands.length) return;   // Plotly moved, do nothing
-  let cur = -1, pinned = null;
-  const show = i => {
-    if (i === cur) return;
-    cur = i;
-    bands.forEach((b, k) => b.style.opacity = (i === null || k === i) ? "" : "0.12");
-    keys.forEach((b, k) => b.style.opacity = (i === null || k === i) ? "" : "0.3");
-  };
-  const hover = i => { if (pinned === null) show(i); };
-  gd.on("plotly_hover", e => hover(e.points[0].curveNumber));
-  gd.on("plotly_unhover", () => hover(null));
-  keys.forEach((node, i) => {
-    node.style.cursor = "pointer";
-    node.addEventListener("mouseenter", () => hover(i));
-    node.addEventListener("mouseleave", () => hover(null));
-    node.addEventListener("click", () => {
-      pinned = pinned === i ? null : i;
-      show(pinned);
+  let pinned = null;            // survives the re-render a window resize causes
+
+  const wire = () => {
+    const fills = [];
+    for (const p of gd.querySelectorAll(".scatterlayer path.js-fill")) {
+      const t = p.__data__ && p.__data__[0] && p.__data__[0].trace;
+      if (t && typeof t.index === "number") fills[t.index] = p;
+    }
+    const keys = [...gd.querySelectorAll(".legend .traces")];
+    const drag = gd.querySelector(".nsewdrag");
+    const cd = gd.calcdata, n = gd.data.length, nq = gd.data[0].x.length;
+    if (!drag || !cd || cd.length !== n || keys.length !== n || nq < 2
+        || fills.length !== n || fills.includes(undefined)) return false;  // Plotly moved
+
+    let cur = -1;
+    const show = i => {
+      if (i === cur) return;
+      cur = i;
+      fills.forEach((p, k) => p.style.opacity = (i === null || k === i) ? "" : "0.12");
+      keys.forEach((g, k) => g.style.opacity = (i === null || k === i) ? "" : "0.3");
+    };
+    if (pinned !== null) show(pinned);
+
+    /* cursor -> the band under it, and the quarter to label. cd[t][i].y is the
+       running total through trace t, which is exactly where that band's top
+       edge is drawn, so the first one the cursor is under is the one it is in. */
+    const hit = evt => {
+      const r = drag.getBoundingClientRect();
+      const xd = gd._fullLayout.xaxis.p2c(evt.clientX - r.left);
+      const yp = gd._fullLayout.yaxis.p2c(evt.clientY - r.top);
+      if (!isFinite(xd) || !isFinite(yp)) return null;
+      const i = Math.max(0, Math.min(nq - 2, Math.floor(xd)));
+      const f = Math.max(0, Math.min(1, xd - i));
+      const q = Math.max(0, Math.min(nq - 1, Math.round(xd)));
+      for (let t = 0; t < n; t++)
+        if (yp <= cd[t][i].y*(1 - f) + cd[t][i+1].y*f) return {b: t, q};
+      return {b: n - 1, q};
+    };
+
+    drag.onmousemove = evt => {
+      const h = hit(evt);
+      if (!h) return;
+      // the label Plotly would have shown, but for the band actually under the cursor
+      Plotly.Fx.hover(gd, [{curveNumber: h.b, pointNumber: h.q}]);
+      if (pinned === null) show(h.b);
+    };
+    drag.onmouseout = () => { Plotly.Fx.unhover(gd); if (pinned === null) show(null); };
+    // clicking a band pins it, clicking it again lets go
+    drag.onclick = evt => {
+      const h = hit(evt);
+      if (!h) return;
+      pinned = pinned === h.b ? null : h.b;
+      show(pinned === null ? h.b : pinned);
+    };
+    keys.forEach((node, i) => {
+      node.style.cursor = "pointer";
+      // assigned, not addEventListener: wire() runs again after every re-render
+      node.onmouseenter = () => { if (pinned === null) show(i); };
+      node.onmouseleave = () => { if (pinned === null) show(null); };
+      node.onclick = () => { pinned = pinned === i ? null : i; show(pinned); };
     });
-  });
-  // a click anywhere on the plot itself releases the pin
-  gd.addEventListener("click", e => {
-    if (e.target.closest(".legend")) return;
-    if (pinned !== null) { pinned = null; show(null); }
-  });
+    return true;
+  };
+
+  // responsive:true redraws on every resize, which throws all of the above away
+  if (wire()) gd.on("plotly_afterplot", wire);
 }
 
 function renderGenreDrift(fams) {
@@ -2234,6 +2290,10 @@ function renderGenreDrift(fams) {
     type:"scatter", mode:"none", stackgroup:"one", groupnorm:"percent",
     name: g.genre, x: q.map(qLabel), y: q.map(k => g.qh[k] || 0),
     fillcolor: FAM_COLOR[g.genre] || "#8b98a8", hoverinfo:"text",
+    /* pinned, not left to Plotly: its default flips to "fills" for a filled
+       trace with nothing else to hover, and focusBands drives the labels from
+       its own hit test on the strength of these being per-point. */
+    hoveron:"points",
     text: q.map((k, i) => `<b>${esc(g.genre)}</b> — ${qLabel(k)}`
       + `<br>${(100*(g.qh[k]||0)/(qt[i]||1)).toFixed(1)}% of that quarter`
       + `<br>${fmtN(g.qh[k] || 0)} scrobbles`
