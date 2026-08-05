@@ -787,6 +787,13 @@ function figNote(id, msg) {
 function plot(id, traces, layout) {
   for (const k of ["xaxis", "yaxis", "xaxis2", "yaxis2"])
     if (layout[k]) layout[k] = {automargin: true, ...layout[k]};
+  /* A panel that said why it was empty and then gets a chart has to lose the
+     note: newPlot appends its own container and leaves anything already in the
+     div alone, so the explanation stayed sitting under the drawing. Switching
+     the Now tab from a scope with no comparison to one that has it did exactly
+     that. Done here rather than at each call site — every panel that can say
+     "nothing to draw" can also be redrawn later with something. */
+  for (const n of $(id).querySelectorAll(".fignote")) n.remove();
   // returned so a caller can attach to the rendered SVG once it exists
   return Plotly.newPlot($(id), traces, layout, CFG);
 }
@@ -2497,10 +2504,13 @@ function nowCards(w) {
 const PACE_SHOWN = 5;                                   // prior periods drawn in full
 function renderNowPace(w) {
   if (!w.back.length) {
-    const why = `There is no earlier ${w.scope} with a full run of `
-      + `history to compare ${w.title} against yet — this panel fills in once there is one.`;
-    $("now-pace-cap").textContent = why;
-    figNote("fig-now-pace", why);   // the caption alone still left an empty box below it
+    /* The note carries it alone. The caption said the same sentence and the box
+       below repeated it word for word — figNote is worth having here because a
+       caption over an empty panel reads as a chart that failed, not because the
+       message deserves saying twice. */
+    $("now-pace-cap").textContent = "";
+    figNote("fig-now-pace", `There is no earlier ${w.scope} with a full run of history to `
+      + `compare ${w.title} against yet — this panel fills in once there is one.`);
     return;
   }
   const cur = paceSeries(w, 0);
@@ -2968,8 +2978,9 @@ async function renderGenres() {
 
   let painted = false;
   const tags = await loadGenres(want, (done, total, sofar) => {
+    // false: the first paint builds the table, it does not repaint one
     if (!painted && sofar.size >= GENRE_FIRST_PAINT)
-      painted = paintGenres(all, sofar, total - done);
+      painted = paintGenres(all, sofar, total - done, false);
     // once drawn, only the counter moves — a full repaint per artist would be
     // four Plotly charts and a table, five times a second
     if (painted) genrePending(total - done);
@@ -2983,7 +2994,10 @@ async function renderGenres() {
     note(""); genrePending(0);
     return;
   }
-  if (!paintGenres(all, tags, 0)) {
+  // `painted` is exactly "the tab is already drawn", which is when the table has
+  // state worth keeping — and it is false on a fresh report, so nothing carries
+  // over from the last one
+  if (!paintGenres(all, tags, 0, painted)) {
     clearFigs("fig-ginside", "fig-gstream", "fig-gmove");
     $("g-table").innerHTML = ""; $("g-chips").innerHTML = "";
     figNote("fig-genre", "No usable genre tags came back for your artists.");
@@ -2993,9 +3007,10 @@ async function renderGenres() {
 
 /* Everything below the lookup, given whatever tags exist right now. `pending` is
    how many artists are still on their way — 0 once the run has finished — and
-   only changes what the captions claim. Returns false when there is nothing
-   worth drawing yet. */
-function paintGenres(all, tags, pending) {
+   only changes what the captions claim. `repaint` says this tab is already on
+   screen, which is what lets the table keep the visitor's search. Returns false
+   when there is nothing worth drawing yet. */
+function paintGenres(all, tags, pending, repaint) {
   const genreOf = new Map();
   let untagged = 0, resolved = 0;
   for (const e of all.slice(0, GENRE_ARTISTS)) {
@@ -3056,7 +3071,7 @@ function paintGenres(all, tags, pending) {
   renderGenreBars(list, classified);
   renderGenreInside(list, fams, classified);
   renderGenreDrift(fams);
-  renderGenreTable(list, classified);
+  renderGenreTable(list, classified, repaint);
   genrePending(pending);
   return true;
 }
@@ -3424,7 +3439,7 @@ function renderGenreDrift(fams) {
     + `<b>${esc(down.name)}</b> lost ${Math.abs(down.d).toFixed(1)}.`;
 }
 
-function renderGenreTable(list, classified) {
+function renderGenreTable(list, classified, repaint) {
   const fullQ = [...new Set([...S.monthCounts.keys()]
     .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a, b) => a-b);
   $("g-table-cap").innerHTML = `All ${fmtN(list.length)} genres, biggest first — including the `
@@ -3446,7 +3461,8 @@ function renderGenreTable(list, classified) {
         <td>${sparkline(g.qh, fullQ)}</td></tr>`;
     },
     {keyFn: g => (g.genre + " " + g.family + " " + g.top.artist).toLowerCase(),
-     noun: "genres", placeholder: "Search genre, family or artist…"});
+     noun: "genres", placeholder: "Search genre, family or artist…",
+     preserve: repaint});
 }
 
 /* --------------------------------------------------------- table machinery */
@@ -3463,6 +3479,20 @@ function tableShell(prefix, n, head, placeholder) {
    needs its own search key and its own noun on the show-all button. */
 function buildSongTable(prefix, containerId, head, cand, rowFn, opts = {}) {
   const keyFn = opts.keyFn || (e => (e.track + " " + e.artist).toLowerCase());
+  /* A rebuild of a table already on screen is a repaint of the same view, and
+     the genres tab does one: the tail of the tag lookup lands and everything
+     redraws. Replacing the container's innerHTML throws away a real input the
+     visitor may be standing in, so carry their own state across it — the query,
+     whether they had expanded the list, and the caret if they were mid-word
+     when it happened. Guarded on opts.preserve rather than done always: every
+     other caller rebuilds because the data underneath changed, and a stale
+     filter from the last report has no business surviving that. */
+  const prev = opts.preserve && TBL[prefix] && $("q_" + prefix);
+  const keep = prev && {
+    q: prev.value, showAll: TBL[prefix].showAll,
+    focused: document.activeElement === prev,
+    start: prev.selectionStart, end: prev.selectionEnd,
+  };
   /* Rows are built on demand, not up front. applyTable never shows more than
      CAP of them, and the artists table holds every artist ever scrobbled —
      6k rows, each with a sparkline SVG, is ~16 MB of string nobody looks at. */
@@ -3470,12 +3500,19 @@ function buildSongTable(prefix, containerId, head, cand, rowFn, opts = {}) {
     keys: cand.map(keyFn),
     items: cand,
     rowFn,
-    showAll: false,
+    showAll: keep ? keep.showAll : false,
     noun: opts.noun || "songs",
   };
   $(containerId).innerHTML = tableShell(prefix, cand.length, head,
     opts.placeholder || "Search title or artist…");
-  $("q_" + prefix).addEventListener("input", () => {
+  const q = $("q_" + prefix);
+  if (keep) {
+    q.value = keep.q;
+    // only if they had it: stealing focus into a search box nobody was using
+    // would be its own bug
+    if (keep.focused) { q.focus(); q.setSelectionRange(keep.start, keep.end); }
+  }
+  q.addEventListener("input", () => {
     TBL[prefix].showAll = false; applyTable(prefix);
   });
   $("btn_" + prefix).addEventListener("click", () => {
@@ -3522,18 +3559,31 @@ document.addEventListener("keydown", ev => {
   trapTab(ev);
 });
 /* A tablist is expected to move under the arrow keys, and with the roving
-   tabindex activate() maintains, Tab itself now lands on the tablist once and
-   then carries on into the panel instead of walking all six buttons. */
+   tabindex activate() maintains, Tab itself lands on the tablist once and then
+   carries on into the panel instead of walking all six buttons.
+
+   The arrows move focus and nothing else; Enter or Space picks, which a <button>
+   already turns into a click for us. Switching on every arrow press is the
+   friendlier default only while showing a panel is free, and one of these is
+   not: arrowing past Genres on the way to Forgotten started a cold tag lookup —
+   five hundred requests, a minute and a half — that nobody had asked for, and a
+   mouse could never have triggered by accident. Uniform rather than special-
+   casing that one tab: a list where five arrows switch the view and the sixth
+   silently does not is harder to understand than one that never does. */
 document.querySelector(".tablist").addEventListener("keydown", ev => {
   const step = {ArrowRight:1, ArrowLeft:-1, Home:"first", End:"last"}[ev.key];
   if (step === undefined) return;
   ev.preventDefault();
-  const i = TABS.indexOf(document.body.dataset.tab);
+  const btns = [...document.querySelectorAll(".tab")];
+  const i = btns.indexOf(document.activeElement);        // focus, not selection
   const next = step === "first" ? 0
-             : step === "last"  ? TABS.length - 1
-             : (i + step + TABS.length) % TABS.length;
-  activate(TABS[next]);
-  $("tabbtn-" + TABS[next]).focus();
+             : step === "last"  ? btns.length - 1
+             : (Math.max(i, 0) + step + btns.length) % btns.length;
+  /* The roving tabindex follows focus while moving through the list, so tabbing
+     out and back returns to where they got to rather than to the open tab.
+     activate() sets it from the selection again the moment they choose. */
+  btns.forEach((b, k) => { b.tabIndex = k === next ? 0 : -1; });
+  btns[next].focus();
 });
 $("brand").addEventListener("click", () => {
   // push, so back returns to the report the visitor just left
