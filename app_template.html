@@ -39,13 +39,27 @@ body[data-tab='evergreen'] { --a:#06d6a0; --b:#4cc9f0; --c:#b388eb; }
 a { color:var(--a); text-decoration:none; }
 a:hover { text-decoration:underline; }
 
+/* One focus ring for everything. The page had none outside three input rules,
+   and the UA default is close to invisible against #0d1117 — so tabbing through
+   it told you nothing about where you were. :focus-visible rather than :focus so
+   a mouse click on a button does not leave a ring behind it. */
+:focus-visible { outline:2px solid var(--a); outline-offset:2px; border-radius:3px; }
+.alink:focus-visible { outline-offset:3px; }
+/* Plotly's SVG tick labels stay mouse-only on purpose: they are a shortcut to
+   the same artist view every table on the page already reaches with a button. */
+
 /* ---- nav / tabs ---- */
 nav.tabs { position:sticky; top:0; z-index:50; display:flex; align-items:flex-end;
            gap:4px; background:rgba(13,17,23,.93); backdrop-filter:blur(8px);
            border-bottom:1px solid #232b36; padding:12px 20px 0; margin:0 -20px; }
 .brand { font-weight:800; font-size:15px; margin-right:auto; padding:0 10px 11px;
-         letter-spacing:-0.2px; cursor:pointer; }
+         letter-spacing:-0.2px; cursor:pointer; background:none; border:none;
+         color:inherit; font-family:inherit; }
 .brand em { font-style:normal; color:var(--a); }
+/* A real flex row rather than display:contents — the tabs have to sit in the
+   nav's own layout, and display:contents on a role-bearing element still drops
+   it out of the accessibility tree in enough browsers to not be worth it. */
+.tablist { display:flex; align-items:flex-end; gap:4px; flex:none; }
 .tab { background:none; border:none; color:#8b98a8; font-family:inherit;
        font-size:13.5px; font-weight:600; padding:10px 14px 11px; cursor:pointer;
        border-bottom:2px solid transparent; }
@@ -67,11 +81,17 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .num { font-size:25px; font-weight:800; }
 .lbl { color:#8b98a8; font-size:11.5px; text-transform:uppercase;
        letter-spacing:.09em; margin-top:5px; }
-.sub2 { color:#5d6a78; font-size:12px; margin-top:7px; }
+.sub2 { color:#7d8b9c; font-size:12px; margin-top:7px; }
 .panel { background:#161b22; border:1px solid #232b36; border-radius:14px;
          padding:24px 24px 12px; margin:24px 0; }
 .panel h2 { margin:0 0 3px; font-size:19px; font-weight:700; }
 .cap { color:#8b98a8; font-size:13px; margin:0 0 12px; }
+/* What a panel says when its chart has nothing to draw. An empty box under a
+   heading reads as a bug; saying why it is empty, and what would fill it, reads
+   as an answer. */
+.fignote { color:#8b98a8; font-size:13px; line-height:1.55; margin:0 0 12px;
+           background:#11151c; border:1px dashed #2b3442; border-radius:10px;
+           padding:15px 18px; }
 .cal-year { margin-bottom:2px; }
 .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 .grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
@@ -109,9 +129,14 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .sheet-x:hover { border-color:var(--a); color:#e6edf3; }
 .sheet h1 { margin-top:6px; font-size:34px; }
 .sheet .panel:last-of-type { margin-bottom:0; }
-/* every artist name on the site is a door into the view above */
+/* every artist name on the site is a door into the view above. A real <button>
+   rather than a styled <span>: these are the primary control on the page, and a
+   span is unreachable by keyboard and announced as plain text. Everything here
+   is undoing the UA button styling so it still reads as a name in running text. */
 .alink { color:inherit; cursor:pointer; text-decoration:none;
-         border-bottom:1px dotted #3a4552; }
+         background:none; border:none; border-bottom:1px dotted #3a4552;
+         padding:0; margin:0; font:inherit; letter-spacing:inherit;
+         line-height:inherit; text-align:inherit; }
 .alink:hover { color:var(--a); border-bottom-color:var(--a); }
 /* the same thing for names Plotly drew as SVG axis labels. fill is set on the
    node by Plotly, so the hover colour has to outrank it. */
@@ -141,7 +166,7 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .chip .pct { color:#8b98a8; font-size:11px; }
 .chip[aria-pressed="true"] { background:#1c232e; border-color:var(--fc); color:#e6edf3; }
 .chip[aria-pressed="true"] .pct { color:#c9d4e0; }
-footer { color:#5d6a78; font-size:12px; text-align:center; margin:44px 0 8px; }
+footer { color:#7d8b9c; font-size:12px; text-align:center; margin:44px 0 8px; }
 
 /* ---- tables ---- */
 .tbl-controls { display:flex; gap:10px; margin-bottom:12px; align-items:center; }
@@ -149,8 +174,8 @@ footer { color:#5d6a78; font-size:12px; text-align:center; margin:44px 0 8px; }
           color:#e6edf3; font-family:inherit; font-size:14px; padding:10px 14px;
           outline:none; }
 .search:focus { border-color:var(--a); }
-.search::placeholder { color:#5d6a78; }
-.matches { color:#5d6a78; font-size:12px; min-width:86px; text-align:right; }
+.search::placeholder { color:#7d8b9c; }
+.matches { color:#7d8b9c; font-size:12px; min-width:86px; text-align:right; }
 .btn { background:#1c2330; border:1px solid #2b3442; color:#c9d4e0;
        border-radius:10px; padding:9px 14px; font-family:inherit; font-size:12px;
        font-weight:600; cursor:pointer; white-space:nowrap; }
@@ -165,12 +190,12 @@ td { padding:7px 10px; border-bottom:1px solid #1c222b; color:#c9d4e0; }
 tbody tr:hover td { background:#1a212b; }
 tbody tr.extra { display:none; }
 tbody tr.extra.revealed { display:table-row; }
-.rank { color:#5d6a78; font-weight:600; }
+.rank { color:#7d8b9c; font-weight:600; }
 .r1 { color:#ffd07b; } .r2 { color:#c9d4e0; } .r3 { color:#ff8c42; }
 .song { font-weight:600; color:#e6edf3; }
 .artist { color:#8b98a8; }
 .num-c { font-variant-numeric:tabular-nums; }
-.dim { color:#5d6a78; font-size:11.5px; }
+.dim { color:#7d8b9c; font-size:11.5px; }
 .spark { display:block; }
 .alive { display:inline-block; width:8px; height:8px; border-radius:50%;
          background:#06d6a0; margin-right:7px; }
@@ -198,12 +223,12 @@ tbody tr.extra.revealed { display:table-row; }
         margin-bottom:16px; }
 .form input[type=text]:focus, .form select:focus { border-color:#ff8c42; }
 .form .btn-primary { width:100%; }
-.form details { margin-bottom:16px; color:#5d6a78; font-size:12.5px; }
+.form details { margin-bottom:16px; color:#7d8b9c; font-size:12.5px; }
 .form summary { cursor:pointer; }
 .form summary:hover { color:#8b98a8; }
 .form .err { display:none; background:#3a1d24; border:1px solid #8a2f45; color:#ffb3ab;
              border-radius:10px; padding:10px 14px; font-size:13px; margin-top:14px; }
-.hero .fine { color:#5d6a78; font-size:12px; margin-top:18px; }
+.hero .fine { color:#7d8b9c; font-size:12px; margin-top:18px; }
 .progress { background:#161b22; border:1px solid #232b36; border-radius:16px;
             padding:30px; width:100%; max-width:520px; }
 .progress .bar { background:#1c222b; border-radius:8px; height:14px; overflow:hidden;
@@ -272,10 +297,15 @@ tbody tr.extra.revealed { display:table-row; }
 <div class="overlay" id="landing">
   <div class="hero">
     <h1>you, in music</h1>
+    <!-- This used to claim the data went "straight from last.fm to your browser",
+         which stopped being true the moment the API key moved server-side: every
+         request now passes through the worker in proxy/. It stores nothing and
+         caches nothing per-user, but the sentence still has to say so honestly. -->
     <p>Enter any last.fm username and get a full listening report:
        every day mapped, your rotating obsessions, the songs you forgot,
-       and the ones that never left.<br>Data goes straight from last.fm to
-       your browser — nothing is stored anywhere else.</p>
+       and the ones that never left.<br>Your scrobbles are relayed through a small
+       proxy that does nothing but add this site's last.fm key — it keeps no copy —
+       and everything after that happens in your own browser.</p>
     <div class="form">
       <label for="inp-user">last.fm username</label>
       <input type="text" id="inp-user" placeholder="e.g. rj" autocomplete="off"
@@ -290,7 +320,8 @@ tbody tr.extra.revealed { display:table-row; }
         <input type="text" id="inp-key" placeholder="API key" autocomplete="off">
       </details>
       <button class="btn btn-primary" id="btn-go">Build my report →</button>
-      <div class="err" id="landing-err"></div>
+      <!-- role=alert so a failure is spoken, not just drawn -->
+      <div class="err" id="landing-err" role="alert"></div>
     </div>
     <p class="fine">plots by plotly · data by <a href="https://www.last.fm/api" target="_blank" rel="noopener">last.fm API</a> · your history is cached locally in your browser for instant revisits</p>
   </div>
@@ -309,17 +340,32 @@ tbody tr.extra.revealed { display:table-row; }
 
 <!-- ======================= APP ======================= -->
 <div class="wrap" id="app" style="display:none">
+  <!-- A real tablist: these were six plain buttons, so a screen reader announced
+       six unrelated controls and never said which view was on screen. The active
+       state was colour and a 2px underline and nothing else. activate() keeps
+       aria-selected and the roving tabindex in step. -->
   <nav class="tabs">
-    <div class="brand" id="brand" title="start over">♪ my <em>listening</em></div>
-    <button class="tab active" data-tab="overview">Overview</button>
-    <button class="tab" data-tab="now">Now</button>
-    <button class="tab" data-tab="artists">Artists</button>
-    <button class="tab" data-tab="genres">Genres</button>
-    <button class="tab" data-tab="forgotten">Forgotten songs</button>
-    <button class="tab" data-tab="evergreen">Evergreen songs</button>
+    <button class="brand" type="button" id="brand" title="start over">♪ my <em>listening</em></button>
+    <div class="tablist" role="tablist" aria-label="Report sections">
+      <button class="tab active" type="button" role="tab" id="tabbtn-overview"
+              aria-selected="true" aria-controls="tab-overview" data-tab="overview">Overview</button>
+      <button class="tab" type="button" role="tab" id="tabbtn-now" tabindex="-1"
+              aria-selected="false" aria-controls="tab-now" data-tab="now">Now</button>
+      <button class="tab" type="button" role="tab" id="tabbtn-artists" tabindex="-1"
+              aria-selected="false" aria-controls="tab-artists" data-tab="artists">Artists</button>
+      <button class="tab" type="button" role="tab" id="tabbtn-genres" tabindex="-1"
+              aria-selected="false" aria-controls="tab-genres" data-tab="genres">Genres</button>
+      <button class="tab" type="button" role="tab" id="tabbtn-forgotten" tabindex="-1"
+              aria-selected="false" aria-controls="tab-forgotten" data-tab="forgotten">Forgotten songs</button>
+      <button class="tab" type="button" role="tab" id="tabbtn-evergreen" tabindex="-1"
+              aria-selected="false" aria-controls="tab-evergreen" data-tab="evergreen">Evergreen songs</button>
+    </div>
   </nav>
 
-  <main id="tab-overview" class="tabpage active">
+  <!-- role="tabpanel" also settles the six-<main> problem this markup had: only
+       one main element may be exposed at a time, and the role replaces it. -->
+  <main id="tab-overview" class="tabpage active" role="tabpanel" tabindex="0"
+        aria-labelledby="tabbtn-overview">
     <header><h1 id="ov-h1">you, in music</h1><p class="tag" id="ov-tag"></p></header>
     <div class="cards" id="ov-cards"></div>
     <section class="panel"><h2>Every single day</h2>
@@ -357,7 +403,8 @@ tbody tr.extra.revealed { display:table-row; }
       <div id="fig-cum"></div></section>
   </main>
 
-  <main id="tab-now" class="tabpage">
+  <main id="tab-now" class="tabpage" role="tabpanel" tabindex="0"
+        aria-labelledby="tabbtn-now">
     <header><h1 id="now-h1">Now</h1><p class="tag" id="now-tag"></p></header>
     <div class="seg" id="now-seg">
       <button type="button" data-scope="year" aria-pressed="true">This year</button>
@@ -374,7 +421,8 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap" id="now-quiet-cap"></p><div id="fig-now-quiet"></div></section>
   </main>
 
-  <main id="tab-artists" class="tabpage">
+  <main id="tab-artists" class="tabpage" role="tabpanel" tabindex="0"
+        aria-labelledby="tabbtn-artists">
     <header><h1>Artists</h1><p class="tag" id="a-tag">Every artist you've ever scrobbled — when they
       arrived, how hard they burned, and whether they stayed.</p></header>
     <div class="cards" id="a-cards"></div>
@@ -399,12 +447,18 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap" id="a-table-cap"></p><div id="a-table"></div></section>
   </main>
 
-  <main id="tab-genres" class="tabpage">
+  <main id="tab-genres" class="tabpage" role="tabpanel" tabindex="0"
+        aria-labelledby="tabbtn-genres">
     <header><h1>Genres</h1><p class="tag" id="g-tag">What last.fm's listeners call the music you
       play — one genre per artist, taken from the tags they voted up.</p></header>
     <div class="cards" id="g-cards"></div>
     <section class="panel"><h2>What you actually listen to</h2>
-      <p class="cap" id="g-top-cap"></p><div id="fig-genre"></div></section>
+      <p class="cap" id="g-top-cap"></p>
+      <!-- its own element, not a prefix on the caption: the count has to keep
+           moving through the lookup, and rewriting the caption means rebuilding
+           four charts and a table to say one number -->
+      <p class="fignote" id="g-pending" hidden></p>
+      <div id="fig-genre"></div></section>
     <section class="panel"><h2>Inside each family</h2>
       <p class="cap" id="g-in-cap"></p>
       <div class="chips" id="g-chips"></div><div id="fig-ginside"></div></section>
@@ -418,7 +472,8 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap" id="g-table-cap"></p><div id="g-table"></div></section>
   </main>
 
-  <main id="tab-forgotten" class="tabpage">
+  <main id="tab-forgotten" class="tabpage" role="tabpanel" tabindex="0"
+        aria-labelledby="tabbtn-forgotten">
     <header><h1>Forgotten songs</h1><p class="tag" id="f-tag">Tracks you loved and left behind — ranked by
       <b>days silent × √(lifetime plays × best-month plays)</b>, so short fierce obsessions outrank slow burns.</p></header>
     <div class="cards" id="f-cards"></div>
@@ -432,7 +487,8 @@ tbody tr.extra.revealed { display:table-row; }
       <p class="cap" id="f-table-cap"></p><div id="f-table"></div></section>
   </main>
 
-  <main id="tab-evergreen" class="tabpage">
+  <main id="tab-evergreen" class="tabpage" role="tabpanel" tabindex="0"
+        aria-labelledby="tabbtn-evergreen">
     <header><h1>Evergreen songs</h1><p class="tag">The ones that never left — ranked by
       <b>months in rotation × coverage</b> (how many distinct months you played them, weighted by how
       gaps-free that run was) · candidates: ≥30 plays, lifespan ≥ 1 year.</p></header>
@@ -480,8 +536,13 @@ tbody tr.extra.revealed { display:table-row; }
 <script id="compute-src">
 "use strict";
 const RECENT_DAYS = 90;
-const EXCLUDE = new Set([["forget it","screwyounick"],["remember when","sam sun"]]
-  .map(([t,a]) => (t+"||"+a).toLowerCase()));
+/* [track, artist] pairs kept out of the forgotten/evergreen rankings. This used
+   to carry two ironically-titled tracks out of the author's own history, which
+   meant every other visitor quietly lost those songs from both tabs — a private
+   joke has no business in a report about somebody else's listening. Left in
+   place as the hook it always was, with nobody's history in it. */
+const EXCLUDE_PAIRS = [];      // e.g. ["forget it", "screwyounick"]
+const EXCLUDE = new Set(EXCLUDE_PAIRS.map(([t,a]) => (t+"||"+a).toLowerCase()));
 
 /* date keys (visitor's local timezone) */
 const mKey = d => d.getFullYear()*12 + d.getMonth();
@@ -715,6 +776,14 @@ function clearFigs(...ids) {
     el.innerHTML = "";
   }
 }
+/* clearFigs empties a panel; this one says why it is empty. A heading and a
+   caption sitting over a blank box reads as a chart that failed to load, which
+   is what the evergreen tab looked like for anyone who picked the 12-month
+   range — its candidates need a year of history, so there were never any. */
+function figNote(id, msg) {
+  clearFigs(id);
+  $(id).innerHTML = `<p class="fignote">${msg}</p>`;
+}
 function plot(id, traces, layout) {
   for (const k of ["xaxis", "yaxis", "xaxis2", "yaxis2"])
     if (layout[k]) layout[k] = {automargin: true, ...layout[k]};
@@ -800,13 +869,36 @@ async function apiPage(user, key, page, fromTs) {
   if (key) p.set("api_key", key);
   const base = viaProxy ? PROXY : API;
   const sep = base.includes("?") ? "&" : "?";
+  /* Every failure used to collapse into one message blaming last.fm, including
+     the ones last.fm had nothing to do with: a proxy that refuses the origin, a
+     worker that is down, or a browser with no connection all reported "last.fm
+     is having trouble". Nothing checked r.ok either, so an HTTP error carrying
+     an HTML body just failed to parse and retried four times in silence. Track
+     what actually went wrong and say that instead. */
+  let lastFail = "unknown";
   for (let attempt = 1; attempt <= 4; attempt++) {
     if (cancelled) throw new Error("cancelled");
     let d = null;
     try {
       const r = await fetch(base + sep + p);
+      /* The proxy answers with its own JSON envelope on refusal, so these are
+         worth reading before deciding anything is retryable. */
+      /* Status only classifies how to describe a failure — it must never decide
+         one on its own. The worker forwards last.fm's status verbatim, and
+         last.fm answers 404 for an unknown user and 403 for a suspended key, so
+         reading those as "the proxy is missing" or "the proxy refused" would
+         hide the two errors the envelope below names exactly. The worker's own
+         500 (no key configured) is the one status worth keeping. */
+      if (r.status === 429) lastFail = "rate";
+      else if (!r.ok) lastFail = (viaProxy && r.status === 500) ? "proxy" : "upstream";
       d = await r.json();
-    } catch (e) { /* fall through to retry */ }
+    } catch (e) {
+      // TypeError from fetch is the network itself: DNS, offline, CORS, blocked.
+      // A refused origin arrives here, not as a readable 403 — the worker sends
+      // CORS headers only to origins it allows, so the browser blocks the body.
+      if (e instanceof TypeError) lastFail = "network";
+      else if (lastFail === "unknown") lastFail = "parse";
+    }
     if (d && !d.error) return d;
     const code = d && d.error;
     if (code === 6) throw new Error("User not found — check the spelling.");
@@ -814,9 +906,25 @@ async function apiPage(user, key, page, fromTs) {
       throw new Error(viaProxy
         ? "last.fm rejected the server's API key — the site owner needs to refresh it."
         : "The API key was rejected. Set a valid one under “advanced”.");
+    // "proxy" came from the worker's own status and outranks the envelope, which
+    // in that case is the worker's error, not last.fm's
+    if (code === 29) lastFail = "rate";
+    else if (code && lastFail !== "proxy") lastFail = "upstream";
     if (attempt < 4) await sleep(2 ** attempt * 500);
   }
-  throw new Error("last.fm is having trouble right now — try again in a bit.");
+  throw new Error({
+    /* A refused origin lands here, and it is the one failure a visitor can
+       actually do something about — so the hint goes in the message that really
+       shows, in brackets so it stays out of the way of everyone it does not
+       apply to. */
+    network: viaProxy
+      ? "Could not reach this site's last.fm proxy — it may be down, or your connection dropped. "
+        + "(Running your own copy? This page's origin has to be listed in ALLOWED_ORIGINS in proxy/worker.js.)"
+      : "Could not reach last.fm — check your connection.",
+    proxy:   "This site's last.fm proxy is failing — the site owner needs to look at it.",
+    rate:    "Too many requests right now — wait a minute and try again.",
+    parse:   "Got an unreadable reply back — try again in a bit.",
+  }[lastFail] || "last.fm is having trouble right now — try again in a bit.");
 }
 function parsePage(d, pg) {
   const out = [];
@@ -1566,7 +1674,18 @@ function renderEvergreen() {
   if (!cand.length) {
     cards("e-cards", [["—", "Nothing here yet", "no year-long song relationships yet"]]);
     $("e-table-cap").textContent = "Keep listening — evergreen songs need a year of history.";
-    clearFigs("fig-ever-bar", "fig-ever-sc", "e-table");
+    /* Anyone who picks "Last 12 months" lands here every time: a song cannot
+       have a lifespan of a year inside a window of one. Say that, rather than
+       leaving three empty boxes under three headings. */
+    const fix = $("sel-range").value === "1y"
+      ? ` You are looking at the last 12 months, so nothing here <em>can</em> clear that bar — `
+        + `rebuild with the full history and this fills in.`
+      : ` Come back once a few songs have been around that long.`;
+    figNote("fig-ever-bar", `Nothing qualifies yet. An evergreen song needs `
+      + `<b>${EVER_MIN_PLAYS}+ plays</b> and at least <b>a year</b> between its first and last `
+      + `play, and no song in this history clears both.${fix}`);
+    figNote("fig-ever-sc", "Nothing to plot until some songs qualify.");
+    figNote("e-table", "The list fills in as songs pass a year in rotation.");
     return;
   }
   const long = [...cand].sort((a,b)=>b.lifespan-a.lifespan)[0];
@@ -1756,8 +1875,12 @@ function renderArtistShape(deep, refM) {
   const fullQ = [...new Set([...S.monthCounts.keys()]
     .map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a, b) => a-b);
 
-  const ribbon = (id, rows, note) => {
-    if (rows.length < 3) { clearFigs(id); return false; }
+  const ribbon = (id, rows, note, empty) => {
+    /* Either side can come up empty on its own — a 12-month history has plenty
+       of flashes and no lifers at all — and the shared caption below only covers
+       the case where both do. A silent blank box under a live <h3> was the
+       result. */
+    if (rows.length < 3) { figNote(id, empty); return false; }
     const src = [...rows].reverse();      // a heatmap's first row is the bottom one
     const y = uniqLabels(src.map(e => trunc(e.artist, 17) + " · " + note(e)));
     const z = [], txt = [];
@@ -1780,8 +1903,16 @@ function renderArtistShape(deep, refM) {
     return true;
   };
 
-  const gotFlash = ribbon("fig-flash", flash, e => `${(100*e.burst).toFixed(0)}%`);
-  const gotLifer = ribbon("fig-lifer", lifer, e => `${e.activeMonths} mo`);
+  const gotFlash = ribbon("fig-flash", flash, e => `${(100*e.burst).toFixed(0)}%`,
+    `No flashes yet — this needs at least three artists with ${ART_MIN_PLAYS}+ plays whose `
+    + `busiest month is ${ART_SETTLED}+ months behind you, so a brand-new obsession is not `
+    + `mistaken for one that burned out.`);
+  const gotLifer = ribbon("fig-lifer", lifer, e => `${e.activeMonths} mo`,
+    `No lifers yet — this needs at least three artists with ${ART_MIN_PLAYS}+ plays who have `
+    + `been around a year and turn up in 60% of the months since you found them.`
+    + ($("sel-range").value === "1y"
+       ? ` On a 12-month window almost nobody can qualify; the full history is where these live.`
+       : ``));
 
   $("a-shape-cap").innerHTML = (gotFlash || gotLifer)
     ? `Two ways an artist can matter, quarter by quarter, each row scaled against its own `
@@ -1884,15 +2015,35 @@ function artistRank(name) {
   return ARTIST_RANK.get(name);
 }
 
+/* The sheet said role="dialog" aria-modal="true" and behaved like neither: focus
+   stayed wherever the click left it, Tab walked straight out into the report
+   behind the backdrop, and closing dropped focus on the body. Escape, the
+   backdrop and the back button were all already handled — this is the rest of it.
+
+   inert on the report does the real work (out of the tab order and out of the
+   accessibility tree in one attribute); the Tab handler below is the fallback
+   for browsers without it, and stops Tab escaping to the browser chrome and
+   coming back into the middle of a hidden page. */
+let artistOpener = null;   // what to hand focus back to on close
+
 function openArtist(name, opts = {}) {
   if (!S || !S.byArtist.has(name)) return;
+  const reopening = !!openArtistName;
   openArtistName = name;
+  /* Only on the way in — following one artist to another from inside the sheet
+     must not forget the row that opened the first one. */
+  if (!reopening) {
+    artistOpener = document.activeElement;
+    $("app").inert = true;
+  }
   /* Unhidden before drawing: Plotly measures a display:none container as zero
      and lays every chart out at its 700px fallback instead. */
   $("artist-sheet").classList.remove("hidden");
   $("artist-sheet").scrollTop = 0;
   document.body.style.overflow = "hidden";
   renderArtistSheet(name);
+  // after render, so the thing being focused is the finished dialog
+  $("ar-close").focus();
   if (!opts.silent) { syncHash("push"); artistPushed = true; }
 }
 
@@ -1904,9 +2055,32 @@ function closeArtist(opts = {}) {
   openArtistName = null;
   artistPushed = false;
   $("artist-sheet").classList.add("hidden");
+  $("app").inert = false;
   document.body.style.overflow = "";
   clearFigs("fig-ar-run", "fig-ar-tracks", "fig-ar-albums", "fig-ar-hour");
+  /* Back where they were, if it is still on the page — a table row that a
+     redraw has since replaced is not, and body is a better answer than a
+     detached node. */
+  if (artistOpener && document.contains(artistOpener)) artistOpener.focus();
+  artistOpener = null;
   if (!opts.silent) syncHash("replace");
+}
+
+/* Keeps Tab inside the sheet. Cheap enough to recompute per keypress — it only
+   runs while the dialog is open, and the node list is a handful of controls. */
+function trapTab(ev) {
+  if (ev.key !== "Tab" || !openArtistName) return;
+  const items = [...$("artist-sheet").querySelectorAll(
+    'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(el => el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  const on = document.activeElement;
+  if (ev.shiftKey && (on === first || !$("artist-sheet").contains(on))) {
+    ev.preventDefault(); last.focus();
+  } else if (!ev.shiftKey && on === last) {
+    ev.preventDefault(); first.focus();
+  }
 }
 
 /* One delegated listener for every artist name the page will ever render,
@@ -1976,7 +2150,13 @@ function wireArtistClicks(id, names, opts = {}) {
   wire();
   gd.on("plotly_afterplot", wire);        // a resize redraws all of the above
 }
-const artistLink = n => `<span class="alink" data-a="${esc(n)}">${esc(trunc(n, 34))}</span>`;
+/* A button, not a span. This is the single most-used control on the site — the
+   whole artist view hangs off it — and as a span it was invisible to the
+   keyboard and announced as ordinary text. The delegated handler above matches
+   on .alink[data-a], so it keeps working unchanged, and Enter/Space now come
+   free with the element instead of needing key handlers of their own. */
+const artistLink = n =>
+  `<button type="button" class="alink" data-a="${esc(n)}">${esc(trunc(n, 34))}</button>`;
 
 function renderArtistSheet(name) {
   const e = S.byArtist.get(name);
@@ -2317,9 +2497,10 @@ function nowCards(w) {
 const PACE_SHOWN = 5;                                   // prior periods drawn in full
 function renderNowPace(w) {
   if (!w.back.length) {
-    clearFigs("fig-now-pace");
-    $("now-pace-cap").textContent = `There is no earlier ${w.scope} with a full run of `
+    const why = `There is no earlier ${w.scope} with a full run of `
       + `history to compare ${w.title} against yet — this panel fills in once there is one.`;
+    $("now-pace-cap").textContent = why;
+    figNote("fig-now-pace", why);   // the caption alone still left an empty box below it
     return;
   }
   const cur = paceSeries(w, 0);
@@ -2731,7 +2912,10 @@ async function loadGenres(want, onProgress) {
   const missing = want.filter(a => !got.has(a));
   const fresh = [];
   let done = want.length - missing.length, failures = 0, i = 0;
-  onProgress(done, want.length);
+  // `got` goes out with every tick so the tab can draw what has landed so far;
+  // guarded on the run id, or a superseded load could paint over a new one
+  const tick = () => { if (genreRun === mine) onProgress(done, want.length, got); };
+  tick();
 
   const pump = async () => {
     while (i < missing.length) {
@@ -2747,7 +2931,7 @@ async function loadGenres(want, onProgress) {
       } else {
         got.set(a, t); fresh.push([a, t]);
       }
-      onProgress(++done, want.length);
+      done++; tick();
     }
   };
   await Promise.all(Array.from({length: GENRE_CONC}, pump));
@@ -2756,34 +2940,75 @@ async function loadGenres(want, onProgress) {
   return got.size ? got : null;
 }
 
+/* The lookup is gated to roughly five requests a second, so GENRE_ARTISTS of
+   them is a minute and a half on a cold cache — and the tab spent all of it as
+   four empty boxes under a line of progress text, which looks broken rather than
+   busy. Artists are looked up biggest-first, so a partial map is already the
+   right shape: draw once there is enough to be worth reading, then redraw when
+   the rest lands. Two paints, not a repaint per artist — every one of them
+   rebuilds four Plotly charts and a table. */
+const GENRE_FIRST_PAINT = 120;
+
+/* The "some of this is still arriving" banner. Hidden at 0, which is also what
+   the final paint passes. */
+function genrePending(n) {
+  const el = $("g-pending");
+  el.hidden = !n;
+  if (n) el.innerHTML = `<b>Still looking up ${fmtN(n)} more artists.</b> Everything on this `
+    + `tab is drawn from the ones that have landed — biggest first, so the shape is already `
+    + `close — and redraws once the rest are in.`;
+}
+
 async function renderGenres() {
   const all = [...S.byArtist.values()].sort((a, b) => b.plays - a.plays);
   const want = all.slice(0, GENRE_ARTISTS).map(e => e.artist);
   const note = m => { $("g-top-cap").textContent = m;
                       $("g-time-cap").textContent = ""; $("g-table-cap").textContent = ""; };
   note("Looking up genres…");
-  const tags = await loadGenres(want, (d, t) =>
-    note(`Looking up genres… ${fmtN(d)} / ${fmtN(t)} artists`));
+
+  let painted = false;
+  const tags = await loadGenres(want, (done, total, sofar) => {
+    if (!painted && sofar.size >= GENRE_FIRST_PAINT)
+      painted = paintGenres(all, sofar, total - done);
+    // once drawn, only the counter moves — a full repaint per artist would be
+    // four Plotly charts and a table, five times a second
+    if (painted) genrePending(total - done);
+    else note(`Looking up genres… ${fmtN(done)} / ${fmtN(total)} artists`);
+  });
   if (!tags) {
     clearFigs("fig-genre", "fig-ginside", "fig-gstream", "fig-gmove");
     $("g-table").innerHTML = ""; $("g-chips").innerHTML = "";
-    note("Genres are unavailable right now — last.fm's tag lookup could not be reached.");
+    figNote("fig-genre", "Genres are unavailable right now — last.fm's tag lookup could "
+      + "not be reached. Leave the tab and come back to try again.");
+    note(""); genrePending(0);
     return;
   }
+  if (!paintGenres(all, tags, 0)) {
+    clearFigs("fig-ginside", "fig-gstream", "fig-gmove");
+    $("g-table").innerHTML = ""; $("g-chips").innerHTML = "";
+    figNote("fig-genre", "No usable genre tags came back for your artists.");
+    note(""); genrePending(0);
+  }
+}
 
+/* Everything below the lookup, given whatever tags exist right now. `pending` is
+   how many artists are still on their way — 0 once the run has finished — and
+   only changes what the captions claim. Returns false when there is nothing
+   worth drawing yet. */
+function paintGenres(all, tags, pending) {
   const genreOf = new Map();
-  let untagged = 0;
+  let untagged = 0, resolved = 0;
   for (const e of all.slice(0, GENRE_ARTISTS)) {
+    /* Only artists whose lookup actually came back. Counting the rest as
+       untagged was wrong even at the end of a complete run — an artist whose
+       request failed was reported as one last.fm has no genre for. */
+    if (!tags.has(e.artist)) continue;
+    resolved++;
     const hit = primaryGenre(tags.get(e.artist));
     if (hit) genreOf.set(e.artist, hit); else untagged++;
   }
   GENRE_OF = genreOf;      // the artist view shows a genre only once this has run
-  if (!genreOf.size) {
-    clearFigs("fig-genre", "fig-ginside", "fig-gstream", "fig-gmove");
-    $("g-table").innerHTML = ""; $("g-chips").innerHTML = "";
-    note("No usable genre tags came back for your artists.");
-    return;
-  }
+  if (!genreOf.size) return false;
 
   /* One aggregate per genre and one per family, carrying enough for every panel
      on the tab. Both are built in the same pass because they only differ in
@@ -2820,8 +3045,10 @@ async function renderGenres() {
     [fmtN(list.length), "Genres you listen to", `${fmtN(solo)} of them from a single artist`],
     [esc(trunc(list[0].genre, 20)), "Your biggest genre",
      `${(100*list[0].plays/classified).toFixed(0)}% of classified plays · ${fmtN(list[0].artists)} artists`],
+    // "of your top 500" while 380 of them are still in flight would be a lie —
+    // count what has actually come back
     [fmtN(genreOf.size), "Artists classified",
-     `of your top ${fmtN(GENRE_ARTISTS)}; ${fmtN(untagged)} had no genre tag last.fm knows`],
+     `of ${fmtN(resolved)} looked up${pending ? ` so far` : ""}; ${fmtN(untagged)} had no genre tag last.fm knows`],
     [`${(100*classified/S.total).toFixed(0)}%`, "Of your listening covered",
      `the unclassified tail is ${fmtN(S.byArtist.size - genreOf.size)} mostly one-play artists`],
   ]);
@@ -2830,6 +3057,8 @@ async function renderGenres() {
   renderGenreInside(list, fams, classified);
   renderGenreDrift(fams);
   renderGenreTable(list, classified);
+  genrePending(pending);
+  return true;
 }
 
 /* A family is a useful unit for drift and a lossy one for describing taste:
@@ -2840,10 +3069,15 @@ async function renderGenres() {
    tab — and re-running it would re-hit the network. */
 let GENRE_INSIDE = null;
 function renderGenreInside(list, fams, classified) {
-  GENRE_INSIDE = {list, fams, classified};
-  $("g-chips").innerHTML = fams.map((f, i) =>
+  /* Hold whichever family is open across a repaint. The tab redraws once more
+     when the tail of the lookup lands, and resetting to the biggest family would
+     shut a panel the visitor had deliberately opened. */
+  const open = GENRE_INSIDE && fams.some(f => f.genre === GENRE_INSIDE.family)
+    ? GENRE_INSIDE.family : fams[0].genre;
+  GENRE_INSIDE = {list, fams, classified, family: open};
+  $("g-chips").innerHTML = fams.map(f =>
     `<button class="chip" type="button" data-fam="${esc(f.genre)}"
-       style="--fc:${FAM_COLOR[f.genre] || "#8b98a8"}" aria-pressed="${i === 0}">
+       style="--fc:${FAM_COLOR[f.genre] || "#8b98a8"}" aria-pressed="${f.genre === open}">
        <span class="dot"></span>${esc(f.genre)}
        <span class="pct">${(100*f.plays/classified).toFixed(1)}%</span></button>`).join("");
   $("g-chips").onclick = e => {
@@ -2852,11 +3086,12 @@ function renderGenreInside(list, fams, classified) {
     for (const c of $("g-chips").children) c.setAttribute("aria-pressed", c === b);
     drawGenreInside(b.dataset.fam);
   };
-  drawGenreInside(fams[0].genre);
+  drawGenreInside(open);
 }
 
 function drawGenreInside(family) {
   const {list, fams, classified} = GENRE_INSIDE;
+  GENRE_INSIDE.family = family;   // what a repaint should reopen
   const fam = fams.find(f => f.genre === family);
   const rows = list.filter(g => g.family === family);      // already biggest-first
   const col = FAM_COLOR[family] || "#8b98a8";
@@ -3284,12 +3519,28 @@ $("artist-sheet").addEventListener("click", ev => {
 });
 document.addEventListener("keydown", ev => {
   if (ev.key === "Escape" && openArtistName) closeArtist();
+  trapTab(ev);
+});
+/* A tablist is expected to move under the arrow keys, and with the roving
+   tabindex activate() maintains, Tab itself now lands on the tablist once and
+   then carries on into the panel instead of walking all six buttons. */
+document.querySelector(".tablist").addEventListener("keydown", ev => {
+  const step = {ArrowRight:1, ArrowLeft:-1, Home:"first", End:"last"}[ev.key];
+  if (step === undefined) return;
+  ev.preventDefault();
+  const i = TABS.indexOf(document.body.dataset.tab);
+  const next = step === "first" ? 0
+             : step === "last"  ? TABS.length - 1
+             : (i + step + TABS.length) % TABS.length;
+  activate(TABS[next]);
+  $("tabbtn-" + TABS[next]).focus();
 });
 $("brand").addEventListener("click", () => {
   // push, so back returns to the report the visitor just left
   history.pushState(null, "", location.pathname);
   $("app").style.display = "none";
   $("landing").classList.remove("hidden");
+  $("inp-user").focus();   // the report just vanished; put them in the form
 });
 /* The month/year switch redraws in place — it is a different window on the same
    data, not a different tab, so it must not go through tabRendered's once-only
@@ -3321,8 +3572,12 @@ function syncHash(mode) {
 
 function activate(name, opts = {}) {
   if (!TABS.includes(name)) name = "overview";   // hash is user input
-  document.querySelectorAll(".tab").forEach(b =>
-    b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab").forEach(b => {
+    const on = b.dataset.tab === name;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on);   // the underline was the only signal before
+    b.tabIndex = on ? 0 : -1;              // roving: one tab stop for the whole list
+  });
   document.querySelectorAll(".tabpage").forEach(p =>
     p.classList.toggle("active", p.id === "tab-" + name));
   document.body.dataset.tab = name;
@@ -3336,7 +3591,13 @@ function activate(name, opts = {}) {
       renderGenres().catch(err => {
         console.warn("genre lookup failed", err);
         clearFigs("fig-genre", "fig-ginside", "fig-gstream", "fig-gmove");
-        $("g-top-cap").textContent = "Genres are unavailable right now.";
+        figNote("fig-genre", "Genres are unavailable right now — the tag lookup could not "
+          + "be reached. Leave the tab and come back to try again.");
+        $("g-top-cap").textContent = ""; genrePending(0);
+        /* Reopen the gate. It is set before the render so a slow lookup is not
+           started twice, but leaving it set on failure made one bad minute of
+           network permanent for the rest of the session. */
+        tabRendered.genres = false;
       });
     }
     else if (name === "forgotten") renderForgotten();
@@ -3389,23 +3650,30 @@ async function load(user, range, force) {
     loadedUser = user;
     // new data: the lazy tabs are stale, so let activate() build them again
     for (const t in tabRendered) tabRendered[t] = false;
-    ARTIST_RANK = null; GENRE_OF = null;
+    ARTIST_RANK = null; GENRE_OF = null; GENRE_INSIDE = null;
     closeArtist({silent: true});
     // Reveal before rendering: a hidden container measures 0, so every chart
     // would be laid out at Plotly's 700px fallback and then resized. The
     // loading overlay still covers this, so nothing flashes.
     $("app").style.display = "block";
     renderOverview(user);
-    $("app-footer").textContent = `${fmtN(S.total)} scrobbles · ${esc(user)} on last.fm · rendered locally in your browser`;
+    // textContent escapes for itself — esc() here would print a literal &amp;
+    // for anyone whose username contains an ampersand
+    $("app-footer").textContent = `${fmtN(S.total)} scrobbles · ${user} on last.fm · rendered locally in your browser`;
     $("loading").classList.add("hidden");
     // replace, not push: a load shouldn't leave a half-built URL behind us
     activate(document.body.dataset.tab || "overview", {replace: true});
     const deepArtist = new URLSearchParams(location.hash.slice(1)).get("artist");
     if (deepArtist) openArtist(deepArtist, {silent: true});
+    /* The form the visitor was standing in has just been replaced by the report.
+       Something has to take focus, or the next Tab starts from the top of the
+       document as though nothing happened. openArtist has already claimed it if
+       we arrived on a deep link. */
+    else $("tabbtn-" + (document.body.dataset.tab || "overview")).focus();
   } catch (e) {
     $("loading").classList.add("hidden");
     $("landing").classList.remove("hidden");
-    if (e.message !== "cancelled") showErr(e.message);
+    if (e.message !== "cancelled") { showErr(e.message); $("inp-user").focus(); }
   }
 }
 

@@ -18,9 +18,13 @@ const FORWARD = ["method", "user", "limit", "page", "from", "to", "artist", "aut
 
 /* An artist's tags are the same for every visitor and barely change, so they
    are cached at the edge for a month: the second person to look up a given
-   artist costs last.fm nothing. Scrobbles are per-user and must stay fresh. */
+   artist costs last.fm nothing.
+
+   Nothing else is cached at all. Scrobbles are one person's listening history,
+   and the 60s default this used to carry meant a visitor's pages sat in
+   Cloudflare's cache after they left — which the site's own front page denied.
+   A method absent from this table is fetched fresh and stored nowhere. */
 const CACHE_TTL = { "artist.getTopTags": 2592000 };
-const DEFAULT_TTL = 60;
 
 const ALLOWED_ORIGINS = new Set([
   "https://shyni-ludo.github.io",
@@ -74,10 +78,13 @@ export default {
     out.searchParams.set("format", "json");
     out.searchParams.set("api_key", env.LASTFM_KEY);
 
+    const ttl = CACHE_TTL[method] || 0;
     let res;
     try {
       res = await fetch(out.toString(), {
-        cf: { cacheTtl: CACHE_TTL[method] || DEFAULT_TTL, cacheEverything: true },
+        cf: ttl
+          ? { cacheTtl: ttl, cacheEverything: true }
+          : { cacheTtl: 0, cacheEverything: false },
         headers: { "User-Agent": "listening-report (github.com/shyni-ludo/listening)" },
       });
     } catch (e) {
@@ -88,7 +95,12 @@ export default {
        last.fm's own error envelope. Never echo the outgoing URL: it has the key. */
     return new Response(res.body, {
       status: res.status,
-      headers: { ...head, "Content-Type": "application/json; charset=utf-8" },
+      headers: {
+        ...head,
+        "Content-Type": "application/json; charset=utf-8",
+        // and tell every cache between here and the visitor the same thing
+        "Cache-Control": ttl ? `public, max-age=${ttl}` : "no-store",
+      },
     });
   },
 };
