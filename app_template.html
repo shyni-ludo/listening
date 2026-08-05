@@ -108,6 +108,13 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
            line-height:1.45; overflow-wrap:anywhere; }
 .fact .v.big { font-size:24px; font-weight:800; letter-spacing:-0.4px; }
 .fact .s { color:#7d8b9c; font-size:12px; margin-top:7px; line-height:1.5; }
+/* Two ends of a range, one per line with its own marker. This was one line
+   joined by an ellipsis, which on a tab full of very long titles reads as
+   "and the rest was cut off" rather than as "from here to here". */
+.fact .end { display:grid; grid-template-columns:22px 1fr; gap:4px 8px;
+             align-items:baseline; }
+.fact .end i { color:var(--a); font-style:normal; font-size:11px; font-weight:700;
+               letter-spacing:.08em; }
 .cal-year { margin-bottom:2px; }
 .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 .grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
@@ -3661,6 +3668,35 @@ function factCards(el, list) {
 // "3 songs" / "1 song", said often enough here to be worth a helper
 const plural = (n, one, many) => fmtN(n) + " " + (n === 1 ? one : many);
 
+/* Titles on this tab go in quotation marks, and it is not decoration. The
+   longest title in this history genuinely ends "…to Leave Now, or..." — Sufjan
+   Stevens named it that — and printed bare it reads as a sentence the card gave
+   up on. The closing quote is what says the whole thing is there. */
+const quoted = s => `“${esc(s)}”`;
+/* And when a title really does trail off, say so, because a closing quote after
+   an ellipsis still looks like an apology for running out of room. */
+const trailsOff = s => /(\.\.\.|…)\s*$/.test(s)
+  ? " · the title really does end like that" : "";
+
+/* The two ends of a sorted range. This was one line with an ellipsis between
+   the halves, which on a tab where several cards hold a 197-character title
+   reads as "cut off" rather than as "from here to here". */
+const ends = (first, last) =>
+  `<span class="end"><i>A</i><span>${quoted(first)}</span>`
+  + `<i>Z</i><span>${quoted(last)}</span></span>`;
+
+/* Never show part of a set without saying so. Fourteen one-character titles
+   under a line reading "14 songs are down to 1 character", with only eight of
+   them printed, is the card contradicting itself. */
+const LIST_CAP = 30;
+function factList(label, items, total, tail) {
+  const shown = items.slice(0, LIST_CAP);
+  const count = total === 1 ? "just the one"
+    : shown.length < total ? `${fmtN(total)} of them — the first ${shown.length} shown`
+    : `all ${fmtN(total)} of them`;
+  return [label, shown.join("&nbsp; · &nbsp;"), count + (tail ? ` · ${tail}` : "")];
+}
+
 function renderFacts() {
   const songs = [...S.bySong.values()].filter(e => e.track && e.track.trim());
   const F = S.facts;
@@ -3700,30 +3736,28 @@ function renderFacts() {
   const named = e => `${artistLink(e.artist)}`;
 
   factCards("x-titles", [
-    ["Longest title", esc(long.track),
+    ["Longest title", quoted(long.track),
      `${plural(long.track.length, "character", "characters")} · ${named(long)} · `
-     + `${plural(long.plays, "play", "plays")}`],
-    loved && ["Longest one you actually play", esc(loved.track),
-     `${loved.track.length} characters and ${fmtN(loved.plays)} plays · ${named(loved)}`],
-    ["Shortest title", tiny.slice(0, 8).map(e => esc(e.track)).join("&nbsp; · &nbsp;"),
-     tiny.length === 1 ? `one character · ${named(tiny[0])}`
-       : `${plural(tiny.length, "song is", "songs are")} down to `
-         + `${plural(tiny[0].track.length, "character", "characters")}`],
+     + `${plural(long.plays, "play", "plays")}` + trailsOff(long.track)],
+    loved && ["Longest one you actually play", quoted(loved.track),
+     `${loved.track.length} characters and ${fmtN(loved.plays)} plays · ${named(loved)}`
+     + trailsOff(loved.track)],
+    factList("Shortest title", tiny.map(e => quoted(e.track)), tiny.length,
+     tiny.length === 1 ? `the only one · ${named(tiny[0])}`
+       : `every one of them ${plural(tiny[0].track.length, "character", "characters")} long`),
     // the winner is usually a whole title with the spaces taken out, in which
     // case naming the title it "sits inside" just says it twice
-    ["Longest run of letters", esc(bigWord),
+    ["Longest run of letters", quoted(bigWord),
      bigWordOf.track.trim() === bigWord
        ? `${bigWord.length} characters, not one space · ${artistLink(bigWordOf.artist)}`
-       : `${bigWord.length} of them, inside ${esc(trunc(bigWordOf.track, 46))}`],
+       : `${bigWord.length} of them, inside ${quoted(bigWordOf.track)}`],
     ["One-word titles", `${(100*oneWord/songs.length).toFixed(0)}%`,
      `${plural(oneWord, "song", "songs")} of your ${fmtN(songs.length)} say it in one word`, true],
-    nums.length && ["Titles that are just a number",
-     nums.slice(0, 8).map(e => esc(e.track)).join("&nbsp; · &nbsp;"),
-     `${plural(nums.length, "song", "songs")} · the most played is `
-     + `${esc(nums[0].track)} by ${named(nums[0])}`],
-    ["Alphabetically", esc(trunc(titlesAZ[0], 40)) + " &nbsp;…&nbsp; "
-     + esc(trunc(titlesAZ[titlesAZ.length-1], 40)),
-     `the first and last of your ${fmtN(titlesAZ.length)} titles`],
+    nums.length && factList("Titles that are just a number",
+     nums.map(e => quoted(e.track)), nums.length,
+     `the most played is ${quoted(nums[0].track)} by ${named(nums[0])}`),
+    ["Alphabetically", ends(titlesAZ[0], titlesAZ[titlesAZ.length-1]),
+     `the first and the last of your ${fmtN(titlesAZ.length)} titles`],
   ]);
   $("x-title-cap").textContent = `Measured across the ${fmtN(songs.length)} distinct songs in `
     + `your history, not per play. A title has to use at least four different characters to `
@@ -3744,18 +3778,17 @@ function renderFacts() {
   const alLong = albums.sort((a, b) => b.length - a.length)[0];
 
   factCards("x-names", [
-    ["Longest artist name", esc(aLong[0]),
+    ["Longest artist name", quoted(aLong[0]),
      `${plural(aLong[0].length, "character", "characters")} · `
-     + `${plural(aLong[1], "play", "plays")}`],
-    ["Shortest artist names",
-     aTiny.slice(0, 6).map(([a]) => artistLink(a)).join("&nbsp; · &nbsp;"),
-     `${plural(aTiny.length, "artist is", "artists are")} down to `
-     + `${plural(aTiny[0][0].length, "character", "characters")} · the most played is `
-     + `${fmtN(aTiny[0][1])}×`],
-    alLong && ["Longest album title", esc(alLong),
-     `${plural(alLong.length, "character", "characters")}`],
-    ["Your artists, A to Z", esc(trunc(artsAZ[0], 32)) + " &nbsp;…&nbsp; "
-     + esc(trunc(artsAZ[artsAZ.length-1], 32)),
+     + `${plural(aLong[1], "play", "plays")}` + trailsOff(aLong[0])],
+    // names stay unquoted here: each one is a button with its own underline,
+    // which already shows where it starts and stops
+    factList("Shortest artist names", aTiny.map(([a]) => artistLink(a)), aTiny.length,
+     `${plural(aTiny[0][0].length, "character", "characters")} each · the most played `
+     + `is ${fmtN(aTiny[0][1])}×`),
+    alLong && ["Longest album title", quoted(alLong),
+     `${plural(alLong.length, "character", "characters")}` + trailsOff(alLong)],
+    ["Your artists, A to Z", ends(artsAZ[0], artsAZ[artsAZ.length-1]),
      `the ends of your ${fmtN(artsAZ.length)} artists`],
   ]);
   $("x-name-cap").textContent = "The same contests, run over the names rather than the titles.";
@@ -3771,7 +3804,7 @@ function renderFacts() {
 
   factCards("x-records", [
     ["Same song, back to back", fmtN(F.run.n) + "×",
-     `${esc(trunc(F.run.track, 44))} by ${artistLink(F.run.artist)}, with nothing `
+     `${quoted(F.run.track)} by ${artistLink(F.run.artist)}, with nothing `
      + `in between`, true],
     ["Longest sitting", plural(sess[0], "song", "songs"),
      `${hrs((sess[2]-sess[1])/3600)} without a ${F.sessionGap/60}-minute break, from `
@@ -3784,9 +3817,9 @@ function renderFacts() {
     ["Played exactly once", plural(oncePlayed, "song", "songs"),
      `${(100*oncePlayed/songs.length).toFixed(0)}% of your songs · and `
      + `${plural(onceArtists, "artist", "artists")} you never went back to`, true],
-    ["Your very first scrobble", esc(trunc(fp[3], 44)),
+    ["Your very first scrobble", quoted(fp[3]),
      `${artistLink(fp[1])} · ${at(fp[0])} on ${fmtDate(fp[0])}`],
-    ["The most recent one", esc(trunc(lp[3], 44)),
+    ["The most recent one", quoted(lp[3]),
      `${artistLink(lp[1])} · ${at(lp[0])} on ${fmtDate(lp[0])}`],
   ]);
   $("x-rec-cap").textContent = `A sitting is scrobbles no more than ${F.sessionGap/60} minutes `
