@@ -1193,9 +1193,9 @@ function renderTopCharts() {
     ["fig-top-a", [...S.artistCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15)
       .map(([k,v]) => [esc(trunc(k,28)), v, k])],
     ["fig-top-t", [...S.pairCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15)
-      .map(([k,v]) => { const [t,a] = k.split("||"); return [`${esc(trunc(t,24))}<br>${esc(trunc(a,24))}`, v, `${t} · ${a}`]; })],
+      .map(([k,v]) => { const [t,a] = k.split("||"); return [`${esc(trunc(t,24))}<br>${esc(trunc(a,24))}`, v, `${t} · ${a}`, a]; })],
     ["fig-top-al", [...S.albumCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15)
-      .map(([k,v]) => { const [t,a] = k.split("||"); return [`${esc(trunc(t,24))}<br>${esc(trunc(a,24))}`, v, `${t} · ${a}`]; })],
+      .map(([k,v]) => { const [t,a] = k.split("||"); return [`${esc(trunc(t,24))}<br>${esc(trunc(a,24))}`, v, `${t} · ${a}`, a]; })],
   ];
   for (const [id, rows] of panels) {
     const vals = rows.map(r=>r[1]), vmin = Math.min(...vals), vmax = Math.max(...vals);
@@ -1211,8 +1211,11 @@ function renderTopCharts() {
       xaxis:{showgrid:false, showticklabels:false, zeroline:false, range:[0, vmax*1.02]},
       yaxis:{automargin:true, showgrid:false, zeroline:false, tickfont:{size:10}} });
   }
-  // only the artists panel names artists; tracks and albums name a pairing
-  wireArtistClicks("fig-top-a", panels[0][1].map(r => r[2]).reverse());
+  /* All three name an artist. The track and album panels print it as the
+     second line of each label, so clicking either line opens them. */
+  wireArtistClicks("fig-top-a",  panels[0][1].map(r => r[2]).reverse());
+  wireArtistClicks("fig-top-t",  panels[1][1].map(r => r[3]).reverse());
+  wireArtistClicks("fig-top-al", panels[2][1].map(r => r[3]).reverse());
 }
 
 /* Two rewrites, both driven by what the data actually says.
@@ -1287,6 +1290,9 @@ function renderBump() {
            showticklabels:false, fixedrange:true},
     yaxis:{autorange:"reversed", showgrid:false, zeroline:false, automargin:true,
            tickfont:{size:11, color:"#8b98a8"}} });
+
+  // the axis here is quarters; the artist is the label each bar carries
+  wireArtistClicks("fig-bump", reign.map(([, [a]]) => a));
 
   const med = [...share].sort((a, b) => a - b)[share.length >> 1];
   $("bump-cap").innerHTML =
@@ -1432,6 +1438,11 @@ function renderCumulative(topA) {
     margin:{l:52, r:150, t:26, b:12},
     xaxis:{tickformat:"%b\n%Y", tickfont:{size:10.5, color:"#8b98a8"}, range:[x[0], x[x.length-1]], showgrid:false, zeroline:false},
     yaxis:{tickformat:",d", tickfont:{size:10.5, color:"#8b98a8"}, showgrid:true, gridcolor:GRID, zeroline:false} });
+  /* Two orders in one chart: the traces are in top8 order, but the end labels
+     were re-sorted by final value so they could be spread apart vertically.
+     Passing both keeps a click on a line and a click on its label agreeing. */
+  wireArtistClicks("fig-cum", top8,
+    {byCurve: true, anns: anns.map(an => an.a), cursor: false});
 }
 
 function renderDiscovery() {
@@ -1475,6 +1486,8 @@ function rankedBar(id, rows, scale, fmtScore, hoverFn) {
   }], { ...baseLayout(34*b.length + 76), annotations:anns,
     xaxis:{showticklabels:false, range:[0, vmax*1.02], showgrid:false, zeroline:false},
     yaxis:{showticklabels:false, showgrid:false, zeroline:false, range:[-0.6, b.length-1+0.78]} });
+  // each row reads "track · artist"; there is no track view, so it opens the artist
+  wireArtistClicks(id, b.map(r => r.artist));
 }
 
 /* -------------------------------------------------------------- forgotten */
@@ -1520,6 +1533,8 @@ function renderForgotten() {
            showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}},
     yaxis:{title:{text:"days since last play", font:{size:11.5, color:"#8b98a8"}},
            showgrid:true, gridcolor:GRID, zeroline:false, tickfont:{size:10.5, color:"#8b98a8"}} });
+  // no cursor change: most of a scatter this sparse is empty space
+  wireArtistClicks("fig-forg-sc", cand.map(e => e.artist), {cursor: false});
 
   const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
   const maxS = top.score || 1;      // the filter above excludes score 0; belt-and-braces
@@ -1588,6 +1603,7 @@ function renderEvergreen() {
     yaxis:{title:{text:"% of months with a play", font:{size:11.5, color:"#8b98a8"}},
            ticksuffix:"%", range:[0,102], showgrid:true, gridcolor:GRID, zeroline:false,
            tickfont:{size:10.5, color:"#8b98a8"}} });
+  wireArtistClicks("fig-ever-sc", cand.map(e => e.artist), {cursor: false});
 
   const fullQ = [...new Set([...S.monthCounts.keys()].map(m => qKey(new Date(((m/12)|0), m%12, 1))))].sort((a,b)=>a-b);
   const maxS = cand[0].score || 1;   // everScore is always > 0 here; belt-and-braces
@@ -1711,7 +1727,7 @@ function renderArtistSpans(top) {
              tickfont:{size:9.5, color:"#8b98a8"}, tickmode:"array",
              tickvals: months.filter(m => m % 12 === 0).map(mLabel)},
       yaxis:{showgrid:false, zeroline:false, tickfont:{size:11, color:"#c9d4e0"}} });
-  wireArtistClicks("fig-aspan", src.map(e => e.artist), p => p.pointNumber[0]);
+  wireArtistClicks("fig-aspan", src.map(e => e.artist), {rowOf: p => p.pointNumber[0]});
 
   const alive = rows.filter(e => e.alive).length;
   $("a-span-cap").innerHTML = `Your ${fmtN(rows.length)} most-played artists, one row each, month `
@@ -1760,7 +1776,7 @@ function renderArtistShape(deep, refM) {
                tickfont:{size:9.5, color:"#8b98a8"},
                tickmode:"array", tickvals: fullQ.filter((_, i) => i % 4 === 0).map(qLabel)},
         yaxis:{showgrid:false, zeroline:false, tickfont:{size:10.5, color:"#c9d4e0"}} });
-    wireArtistClicks(id, src.map(e => e.artist), p => p.pointNumber[0]);
+    wireArtistClicks(id, src.map(e => e.artist), {rowOf: p => p.pointNumber[0]});
     return true;
   };
 
@@ -1904,14 +1920,16 @@ document.addEventListener("click", ev => {
 /* Charts hand back a point index, so each one supplies the names in its own
    drawing order. Setting the cursor on the drag layer is what makes a chart
    look clickable at all — Plotly's default crosshair says the opposite. */
-function wireArtistClicks(id, names, rowOf) {
+function wireArtistClicks(id, names, opts = {}) {
   const gd = $(id);
   if (!gd || !gd.on) return;
   gd.on("plotly_click", d => {
     const p = d.points && d.points[0];
     if (!p) return;
-    const i = rowOf ? rowOf(p) : p.pointNumber;
-    const n = names[i];
+    // one line per artist means the curve is the artist; everywhere else it is
+    // the point's own index
+    const n = opts.byCurve ? names[p.curveNumber]
+            : names[opts.rowOf ? opts.rowOf(p) : p.pointNumber];
     if (n) openArtist(n);
   });
   /* The y-axis labels ARE the artist names, so they are the first thing anyone
@@ -1927,19 +1945,36 @@ function wireArtistClicks(id, names, rowOf) {
      trace's own y order on every chart this is used on, heatmaps and bar charts
      alike — with a length check so a future Plotly that reorders them makes
      this do nothing rather than open the wrong artist. */
-  const wireTicks = () => {
-    const ticks = gd.querySelectorAll(".yaxislayer-above text");
-    if (ticks.length === names.length) ticks.forEach((t, i) => {
-      if (!names[i]) return;
+  /* Three different places a chart on this page can print a name, and none of
+     them is inside the plot area: axis tick labels, the text a bar carries
+     beside itself, and free-standing annotations. The rotating-obsessions
+     chart puts the artist in bar text and the quarter on the axis; the
+     cumulative chart and both ranked-song charts use annotations. Each is
+     opted back in the same way, and each is skipped unless its node count
+     matches the list exactly, so a layout that is not the one measured here
+     does nothing rather than opening the wrong person. */
+  const paint = (sel, list) => {
+    const nodes = gd.querySelectorAll(sel);
+    if (nodes.length !== list.length) return;
+    nodes.forEach((t, i) => {
+      if (!list[i]) return;
       t.style.pointerEvents = "all";      // beats Plotly's own, measured
       t.classList.add("artist-tick");
-      t.onclick = () => openArtist(names[i]);
+      t.onclick = () => openArtist(list[i]);
     });
-    const drag = gd.querySelector(".nsewdrag");
+  };
+  const wire = () => {
+    paint(".yaxislayer-above text", names);
+    paint(".barlayer text", names);
+    paint("g.annotation text", opts.anns || names);
+    /* Only where the whole plot area opens something. On a scatter of 1,400
+       songs or a line chart, a pointer cursor over empty space promises a
+       click that will not happen. */
+    const drag = opts.cursor === false ? null : gd.querySelector(".nsewdrag");
     if (drag) drag.style.cursor = "pointer";
   };
-  wireTicks();
-  gd.on("plotly_afterplot", wireTicks);   // a resize redraws the labels
+  wire();
+  gd.on("plotly_afterplot", wire);        // a resize redraws all of the above
 }
 const artistLink = n => `<span class="alink" data-a="${esc(n)}">${esc(trunc(n, 34))}</span>`;
 
