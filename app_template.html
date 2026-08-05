@@ -35,6 +35,7 @@ body[data-tab='artists']   { --a:#a78bfa; --b:#7c5cd6; --c:#f0abfc; }
 body[data-tab='genres']    { --a:#ff6ec7; --b:#c2258f; --c:#ffd6f5; }
 body[data-tab='forgotten'] { --a:#ff8c42; --b:#e0523c; --c:#ffd07b; }
 body[data-tab='evergreen'] { --a:#06d6a0; --b:#4cc9f0; --c:#b388eb; }
+body[data-tab='facts']     { --a:#ffd166; --b:#f4a261; --c:#ffe8b0; }
 .wrap { max-width:1180px; margin:0 auto; }
 a { color:var(--a); text-decoration:none; }
 a:hover { text-decoration:underline; }
@@ -92,6 +93,21 @@ h1 { font-size:42px; font-weight:800; margin:34px 0 0; letter-spacing:-0.5px;
 .fignote { color:#8b98a8; font-size:13px; line-height:1.55; margin:0 0 12px;
            background:#11151c; border:1px dashed #2b3442; border-radius:10px;
            padding:15px 18px; }
+/* Cards for the facts tab. The .card/.num pair above is built for a number and
+   a label; half of these are a 197-character song title, so the value needs to
+   be prose-sized, wrappable, and allowed to break mid-word — there are titles
+   here with no spaces in them at all. */
+.facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+         gap:14px; margin:18px 0 12px; }
+.fact { background:#11151c; border:1px solid #232b36; border-radius:12px;
+        padding:15px 17px; transition:border-color .15s ease; }
+.fact:hover { border-color:var(--a); }
+.fact .k { color:#8b98a8; font-size:11px; text-transform:uppercase;
+           letter-spacing:.09em; }
+.fact .v { font-size:15px; font-weight:700; color:#e6edf3; margin-top:7px;
+           line-height:1.45; overflow-wrap:anywhere; }
+.fact .v.big { font-size:24px; font-weight:800; letter-spacing:-0.4px; }
+.fact .s { color:#7d8b9c; font-size:12px; margin-top:7px; line-height:1.5; }
 .cal-year { margin-bottom:2px; }
 .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 .grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
@@ -359,6 +375,8 @@ tbody tr.extra.revealed { display:table-row; }
               aria-selected="false" aria-controls="tab-forgotten" data-tab="forgotten">Forgotten songs</button>
       <button class="tab" type="button" role="tab" id="tabbtn-evergreen" tabindex="-1"
               aria-selected="false" aria-controls="tab-evergreen" data-tab="evergreen">Evergreen songs</button>
+      <button class="tab" type="button" role="tab" id="tabbtn-facts" tabindex="-1"
+              aria-selected="false" aria-controls="tab-facts" data-tab="facts">Fun facts</button>
     </div>
   </nav>
 
@@ -502,6 +520,25 @@ tbody tr.extra.revealed { display:table-row; }
       <div id="fig-ever-sc"></div></section>
     <section class="panel"><h2>The full list</h2>
       <p class="cap" id="e-table-cap"></p><div id="e-table"></div></section>
+  </main>
+
+  <main id="tab-facts" class="tabpage" role="tabpanel" tabindex="0"
+        aria-labelledby="tabbtn-facts">
+    <header><h1>Fun facts</h1><p class="tag" id="x-tag">The odd corners of your history — the
+      titles, the names, and the records you probably did not know you held.</p></header>
+    <section class="panel"><h2>Titles</h2>
+      <p class="cap" id="x-title-cap"></p>
+      <div class="facts" id="x-titles"></div></section>
+    <section class="panel"><h2>The words you play</h2>
+      <p class="cap" id="x-word-cap"></p><div id="fig-x-words"></div></section>
+    <section class="panel"><h2>Names</h2>
+      <p class="cap" id="x-name-cap"></p>
+      <div class="facts" id="x-names"></div></section>
+    <section class="panel"><h2>Records</h2>
+      <p class="cap" id="x-rec-cap"></p>
+      <div class="facts" id="x-records"></div></section>
+    <section class="panel"><h2>Your longest sittings</h2>
+      <p class="cap" id="x-sess-cap"></p><div id="fig-x-sess"></div></section>
   </main>
 
   <footer id="app-footer"></footer>
@@ -685,6 +722,55 @@ function compute(rows) {
     e.everScore = e.activeMonths * e.coverage;   // same shape as the song version
   }
   s.byArtist = byArtist; s.aqHist = aqHist; s.amHist = amHist;
+
+  /* The facts tab. Everything textual is derived on the main thread from maps
+     that already exist, but these five need the scrobbles in the order they
+     happened — and `rows` is not in that order. fetchAll runs four pages at a
+     time and concatenates each as it lands, so the array is in completion
+     order; nothing else in here ever noticed, because everything else takes a
+     min, a max or a count. Sorted as indices rather than as a copy of the
+     array: one Uint32Array beside 170k rows, not 170k tuples cloned to reorder
+     them, and what goes back across the worker boundary is a few dozen values
+     either way. */
+  if (rows.length) {
+    const ord = new Uint32Array(rows.length);
+    for (let i = 0; i < ord.length; i++) ord[i] = i;
+    ord.sort((a, b) => rows[a][0] - rows[b][0]);
+
+    /* Twenty minutes. Long enough to survive a track you skipped, a phone call
+       or a slow scrobbler, short enough that yesterday evening and this morning
+       do not become one sitting. */
+    const SESSION_GAP = 20*60;
+    const sessions = [];              // [songs, startUts, endUts]
+    let run = 0, runKey = null, bestRun = null, smallHours = 0;
+    let sStart = 0, sN = 0, prev = 0, bestGap = null;
+    for (let i = 0; i < ord.length; i++) {
+      const r = rows[ord[i]], uts = r[0], artist = r[1], track = r[3];
+      const k = track + "||" + artist;
+      run = k === runKey ? run + 1 : 1;
+      runKey = k;
+      if (!bestRun || run > bestRun.n) bestRun = {n: run, track, artist};
+      const h = new Date(uts*1000).getHours();
+      if (h >= 3 && h < 6) smallHours++;
+      if (i === 0) { sStart = uts; sN = 1; }
+      else {
+        const gap = uts - prev;
+        if (!bestGap || gap > bestGap.secs) bestGap = {secs: gap, from: prev, to: uts};
+        if (gap <= SESSION_GAP) sN++;
+        else { sessions.push([sN, sStart, prev]); sStart = uts; sN = 1; }
+      }
+      prev = uts;
+    }
+    sessions.push([sN, sStart, prev]);          // the run the loop ended inside
+    sessions.sort((a, b) => b[0] - a[0]);
+    s.facts = {
+      run: bestRun, gap: bestGap, smallHours,
+      sessionGap: SESSION_GAP,
+      sessions: sessions.slice(0, 10),
+      sessionCount: sessions.length,
+      firstPlay: rows[ord[0]], lastPlay: rows[ord[ord.length-1]],
+    };
+  }
   return s;
 }
 
@@ -3546,6 +3632,227 @@ function applyTable(prefix) {   // render rows on demand — keeps the DOM light
     : "Show all " + fmtN(t.items.length) + " " + t.noun;
 }
 
+/* ================================================================= fun facts */
+/* All of this comes out of maps compute() already built, except the five
+   records that need the scrobbles in the order they happened — those arrive in
+   S.facts because only the worker has the rows. Nothing here costs a request or
+   a second pass over the history.
+
+   A string has to carry at least four different characters before it can win a
+   "longest" contest. Without that rule every winner is metadata junk: the
+   longest album title in this account is 123 copies of one glyph and the
+   longest track title is 100 copies of a combining mark. Those are not facts. */
+const varied = s => new Set(s).size >= 4;
+const FACT_LOVED = 10;      // plays before a title counts as one you really play
+/* Credit tokens, not words anybody listens to. "remix" deliberately stays in —
+   it is the most-scrobbled word in this history and that says something real. */
+const FACT_STOP = new Set(("the a an and or of to in on at as my your you i me it its is "
+  + "are was were be been for with that this these those no not do dont im ive from we "
+  + "they he she her his our but so if all up out down off over into by can will just "
+  + "feat ft featuring vs versus pt part remaster remastered version original mix edit")
+  .split(" "));
+
+function factCards(el, list) {
+  $(el).innerHTML = list.filter(Boolean).map(([k, v, sub, big]) =>
+    `<div class="fact"><div class="k">${k}</div>`
+    + `<div class="v${big ? " big" : ""}">${v}</div>`
+    + `<div class="s">${sub}</div></div>`).join("");
+}
+// "3 songs" / "1 song", said often enough here to be worth a helper
+const plural = (n, one, many) => fmtN(n) + " " + (n === 1 ? one : many);
+
+function renderFacts() {
+  const songs = [...S.bySong.values()].filter(e => e.track && e.track.trim());
+  const F = S.facts;
+  if (!songs.length || !F) {          // an empty history has no odd corners
+    for (const id of ["x-titles", "x-names", "x-records"]) $(id).innerHTML = "";
+    figNote("fig-x-words", "Nothing to count yet.");
+    figNote("fig-x-sess", "Nothing to count yet.");
+    return;
+  }
+
+  /* ------------------------------------------------------------- titles ---- */
+  const byLen = songs.filter(e => varied(e.track))
+    .sort((a, b) => b.track.length - a.track.length || b.plays - a.plays);
+  const long = byLen[0];
+  // only worth its own card when it is not already the winner above
+  const loved = byLen.find(e => e.plays >= FACT_LOVED && e !== long);
+  const shorts = [...songs].sort((a, b) => a.track.length - b.track.length || b.plays - a.plays);
+  const tiny = shorts.filter(e => e.track.length === shorts[0].track.length);
+
+  /* One unbroken run of letters or digits. Scripts written without spaces make
+     a whole title one "word", which is why the card says letters in a row
+     rather than claiming to have found an English word. */
+  const WORDRE = /[\p{L}\p{N}']+/gu;
+  let bigWord = "", bigWordOf = null;
+  for (const e of songs)
+    for (const w of e.track.match(WORDRE) || [])
+      if (w.length > bigWord.length) { bigWord = w; bigWordOf = e; }
+
+  const oneWord = songs.filter(e => e.track.trim().split(/\s+/).length === 1).length;
+  /* Six digits at most. Beyond that it stops being a song called 1001 and
+     starts being an upload id some scrobbler passed through as a title. */
+  const nums = songs.filter(e => /^\d{1,6}$/.test(e.track.trim()))
+    .sort((a, b) => b.plays - a.plays);
+
+  const coll = new Intl.Collator(undefined, {sensitivity: "base"});
+  const titlesAZ = songs.map(e => e.track).sort(coll.compare);
+  const named = e => `${artistLink(e.artist)}`;
+
+  factCards("x-titles", [
+    ["Longest title", esc(long.track),
+     `${plural(long.track.length, "character", "characters")} · ${named(long)} · `
+     + `${plural(long.plays, "play", "plays")}`],
+    loved && ["Longest one you actually play", esc(loved.track),
+     `${loved.track.length} characters and ${fmtN(loved.plays)} plays · ${named(loved)}`],
+    ["Shortest title", tiny.slice(0, 8).map(e => esc(e.track)).join("&nbsp; · &nbsp;"),
+     tiny.length === 1 ? `one character · ${named(tiny[0])}`
+       : `${plural(tiny.length, "song is", "songs are")} down to `
+         + `${plural(tiny[0].track.length, "character", "characters")}`],
+    // the winner is usually a whole title with the spaces taken out, in which
+    // case naming the title it "sits inside" just says it twice
+    ["Longest run of letters", esc(bigWord),
+     bigWordOf.track.trim() === bigWord
+       ? `${bigWord.length} characters, not one space · ${artistLink(bigWordOf.artist)}`
+       : `${bigWord.length} of them, inside ${esc(trunc(bigWordOf.track, 46))}`],
+    ["One-word titles", `${(100*oneWord/songs.length).toFixed(0)}%`,
+     `${plural(oneWord, "song", "songs")} of your ${fmtN(songs.length)} say it in one word`, true],
+    nums.length && ["Titles that are just a number",
+     nums.slice(0, 8).map(e => esc(e.track)).join("&nbsp; · &nbsp;"),
+     `${plural(nums.length, "song", "songs")} · the most played is `
+     + `${esc(nums[0].track)} by ${named(nums[0])}`],
+    ["Alphabetically", esc(trunc(titlesAZ[0], 40)) + " &nbsp;…&nbsp; "
+     + esc(trunc(titlesAZ[titlesAZ.length-1], 40)),
+     `the first and last of your ${fmtN(titlesAZ.length)} titles`],
+  ]);
+  $("x-title-cap").textContent = `Measured across the ${fmtN(songs.length)} distinct songs in `
+    + `your history, not per play. A title has to use at least four different characters to `
+    + `win anything — otherwise every record goes to a string of one repeated glyph.`;
+
+  renderFactWords(songs);
+
+  /* -------------------------------------------------------------- names ---- */
+  const arts = [...S.artistCounts.entries()];
+  const aLong = arts.filter(([a]) => varied(a))
+    .sort((x, y) => y[0].length - x[0].length || y[1] - x[1])[0];
+  const aShort = [...arts].sort((x, y) => x[0].length - y[0].length || y[1] - x[1]);
+  const aTiny = aShort.filter(([a]) => a.length === aShort[0][0].length)
+    .sort((x, y) => y[1] - x[1]);
+  const artsAZ = arts.map(([a]) => a).sort(coll.compare);
+  const albums = [...S.albumCounts.keys()].map(k => k.slice(0, k.lastIndexOf("||")))
+    .filter(varied);
+  const alLong = albums.sort((a, b) => b.length - a.length)[0];
+
+  factCards("x-names", [
+    ["Longest artist name", esc(aLong[0]),
+     `${plural(aLong[0].length, "character", "characters")} · `
+     + `${plural(aLong[1], "play", "plays")}`],
+    ["Shortest artist names",
+     aTiny.slice(0, 6).map(([a]) => artistLink(a)).join("&nbsp; · &nbsp;"),
+     `${plural(aTiny.length, "artist is", "artists are")} down to `
+     + `${plural(aTiny[0][0].length, "character", "characters")} · the most played is `
+     + `${fmtN(aTiny[0][1])}×`],
+    alLong && ["Longest album title", esc(alLong),
+     `${plural(alLong.length, "character", "characters")}`],
+    ["Your artists, A to Z", esc(trunc(artsAZ[0], 32)) + " &nbsp;…&nbsp; "
+     + esc(trunc(artsAZ[artsAZ.length-1], 32)),
+     `the ends of your ${fmtN(artsAZ.length)} artists`],
+  ]);
+  $("x-name-cap").textContent = "The same contests, run over the names rather than the titles.";
+
+  /* ------------------------------------------------------------ records ---- */
+  const oncePlayed = songs.filter(e => e.plays === 1).length;
+  const onceArtists = [...S.artistCounts.values()].filter(n => n === 1).length;
+  const sess = F.sessions[0];
+  const hrs = h => h >= 1 ? h.toFixed(1) + " h" : Math.round(h*60) + " min";
+  const at = uts => { const d = new Date(uts*1000);
+    return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); };
+  const fp = F.firstPlay, lp = F.lastPlay;
+
+  factCards("x-records", [
+    ["Same song, back to back", fmtN(F.run.n) + "×",
+     `${esc(trunc(F.run.track, 44))} by ${artistLink(F.run.artist)}, with nothing `
+     + `in between`, true],
+    ["Longest sitting", plural(sess[0], "song", "songs"),
+     `${hrs((sess[2]-sess[1])/3600)} without a ${F.sessionGap/60}-minute break, from `
+     + `${at(sess[1])} on ${fmtDate(sess[1])}`, true],
+    ["Longest silence", fmtSpan(Math.round(F.gap.secs/86400)),
+     `nothing at all between ${fmtDate(F.gap.from)} and ${fmtDate(F.gap.to)}`, true],
+    ["Between 3am and 6am", fmtN(F.smallHours),
+     `${(100*F.smallHours/S.total).toFixed(1)}% of everything you have played happened `
+     + `in those three hours`, true],
+    ["Played exactly once", plural(oncePlayed, "song", "songs"),
+     `${(100*oncePlayed/songs.length).toFixed(0)}% of your songs · and `
+     + `${plural(onceArtists, "artist", "artists")} you never went back to`, true],
+    ["Your very first scrobble", esc(trunc(fp[3], 44)),
+     `${artistLink(fp[1])} · ${at(fp[0])} on ${fmtDate(fp[0])}`],
+    ["The most recent one", esc(trunc(lp[3], 44)),
+     `${artistLink(lp[1])} · ${at(lp[0])} on ${fmtDate(lp[0])}`],
+  ]);
+  $("x-rec-cap").textContent = `A sitting is scrobbles no more than ${F.sessionGap/60} minutes `
+    + `apart — long enough to survive a skipped track or a phone call, short enough that `
+    + `last night and this morning stay separate.`;
+
+  renderFactSessions(F);
+}
+
+/* The words themselves, weighted by plays rather than by song: a word in a
+   title you played four hundred times counts four hundred times. */
+function renderFactWords(songs) {
+  const WORDRE = /[\p{L}\p{N}']+/gu;
+  const count = new Map();
+  for (const e of songs)
+    for (const w of e.track.toLowerCase().match(WORDRE) || []) {
+      if (w.length < 3 || FACT_STOP.has(w)) continue;
+      count.set(w, (count.get(w) || 0) + e.plays);
+    }
+  const top = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).reverse();
+  if (top.length < 5) {
+    figNote("fig-x-words", "Not enough words in your titles to count yet.");
+    $("x-word-cap").textContent = "";
+    return;
+  }
+  const vals = top.map(r => r[1]), vmax = Math.max(...vals);
+  plot("fig-x-words", [{
+    type:"bar", orientation:"h", y: top.map(r => r[0]), x: vals,
+    marker:{color: vals, colorscale: WARM, cmin: 0, cmax: vmax},
+    text: vals.map(v => fmtN(v)), textposition:"inside", insidetextanchor:"end",
+    textfont:{size:10.5, color:"#20293a"},
+    hovertemplate:"“%{y}” · %{x:,} scrobbles<extra></extra>",
+  }], { ...baseLayout(34*top.length + 40), margin:{l:6, r:6, t:8, b:24},
+    xaxis:{showgrid:false, showticklabels:false, zeroline:false, range:[0, vmax*1.02]},
+    yaxis:{automargin:true, showgrid:false, zeroline:false,
+           tickfont:{size:12, color:"#c9d4e0"}} });
+  $("x-word-cap").innerHTML = `Every word in every title you have played, counted once per `
+    + `scrobble rather than once per song. Common English filler and credit tags like `
+    + `“feat.” are dropped; <b>remix</b> is not, because it is a real thing about you.`;
+}
+
+/* Sittings, longest first. The bar is how many songs; the hover carries the
+   clock, because "353 songs" and "16 hours" are two different kinds of long. */
+function renderFactSessions(F) {
+  const src = [...F.sessions].reverse();
+  const vals = src.map(s => s[0]), vmax = Math.max(...vals);
+  plot("fig-x-sess", [{
+    type:"bar", orientation:"h", x: vals,
+    y: uniqLabels(src.map(s => fmtDate(s[1]))),
+    marker:{color: vals, colorscale: COOL, cmin: 0, cmax: vmax},
+    text: vals.map(v => fmtN(v)), textposition:"inside", insidetextanchor:"end",
+    textfont:{size:10.5, color:"#20293a"},
+    customdata: src.map(s => {
+      const h = (s[2]-s[1])/3600;
+      return `${fmtN(s[0])} songs<br>${h >= 1 ? h.toFixed(1)+" hours" : Math.round(h*60)+" minutes"}`
+        + `<br>from ${new Date(s[1]*1000).getHours()}:00`;
+    }),
+    hovertemplate:"%{customdata}<extra></extra>",
+  }], { ...baseLayout(34*src.length + 40), margin:{l:6, r:6, t:8, b:24},
+    xaxis:{showgrid:false, showticklabels:false, zeroline:false, range:[0, vmax*1.02]},
+    yaxis:{automargin:true, showgrid:false, zeroline:false,
+           tickfont:{size:11, color:"#c9d4e0"}} });
+  $("x-sess-cap").textContent = `Your ten longest unbroken runs, out of `
+    + `${fmtN(F.sessionCount)} altogether.`;
+}
+
 /* ================================================================ tabs/main */
 document.querySelectorAll(".tab").forEach(btn =>
   btn.addEventListener("click", () => activate(btn.dataset.tab)));
@@ -3603,8 +3910,8 @@ document.querySelectorAll("#now-seg button").forEach(btn =>
     syncHash("push");
   }));
 const tabRendered = { now: false, artists: false, genres: false, forgotten: false,
-                      evergreen: false };
-const TABS = ["overview", "now", "artists", "genres", "forgotten", "evergreen"];
+                      evergreen: false, facts: false };
+const TABS = ["overview", "now", "artists", "genres", "forgotten", "evergreen", "facts"];
 
 /* The hash carries the whole view — user, tab, range and window — so a link to
    one tab survives a reload and can be shared, not just the username. */
@@ -3630,6 +3937,11 @@ function activate(name, opts = {}) {
   });
   document.querySelectorAll(".tabpage").forEach(p =>
     p.classList.toggle("active", p.id === "tab-" + name));
+  /* On a phone the tab strip is wider than the screen and scrolls sideways, so
+     a tab reached by a link or by the arrow keys can be selected while sitting
+     off the edge. "nearest" on both axes nudges the strip and leaves the page
+     alone — and does nothing at all on a desktop, where nothing overflows. */
+  $("tabbtn-" + name).scrollIntoView({block: "nearest", inline: "nearest"});
   document.body.dataset.tab = name;
   if (!opts.silent) syncHash(opts.replace ? "replace" : "push");
   if (S && name in tabRendered && !tabRendered[name]) {  // lazy: render on first visit
@@ -3650,6 +3962,7 @@ function activate(name, opts = {}) {
         tabRendered.genres = false;
       });
     }
+    else if (name === "facts") renderFacts();
     else if (name === "forgotten") renderForgotten();
     else renderEvergreen();
   }
